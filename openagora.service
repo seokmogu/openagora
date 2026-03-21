@@ -7,7 +7,8 @@ Type=simple
 User=hackit
 WorkingDirectory=/home/hackit/project/openagora
 EnvironmentFile=/home/hackit/project/openagora/.env
-ExecStart=/usr/bin/node dist/index.js
+Environment=PATH=/home/hackit/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/home/hackit/.local/bin/node dist/index.js
 Restart=always
 RestartSec=5
 StandardOutput=journal
