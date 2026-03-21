@@ -123,6 +123,7 @@ export class ModelRouter {
         Authorization: `Bearer ${cfg.apiKey}`,
       },
       body: JSON.stringify(body),
+      signal: AbortSignal.timeout(5 * 60 * 1000), // 5 min API timeout
     });
 
     if (!res.ok) {

@@ -90,46 +90,52 @@ export class AgentExecutor {
         detached: true, // allows process group kill
       });
 
-      if (!child.pid) {
-        reject(new Error('Failed to spawn claude process'));
-        return;
-      }
+      // settled guard — prevent double-resolve/reject from timer + close races
+      let settled = false;
+      const settle = (fn: () => void): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        if (child.pid) this.processWatcher.unregister(child.pid);
+        fn();
+      };
 
-      this.processWatcher.register(child.pid, taskId);
-
+      // Attach all listeners BEFORE checking pid to avoid spawn error races
       let stdout = '';
       let stderr = '';
 
-      child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString(); });
-      child.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
+      child.stdout?.on('data', (chunk: Buffer) => { stdout += chunk.toString(); });
+      child.stderr?.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
 
       const timer = setTimeout(() => {
         logger.warn('AgentExecutor: task timeout, killing process group', { taskId, pid: child.pid });
         try {
-          // Kill entire process group to prevent zombies (P2/P3)
-          process.kill(-(child.pid as number), 'SIGKILL');
+          if (child.pid) process.kill(-child.pid, 'SIGKILL');
         } catch {
           child.kill('SIGKILL');
         }
-        reject(new Error(`Task ${taskId} timed out after ${TIMEOUT_MS / 1000}s`));
+        settle(() => reject(new Error(`Task ${taskId} timed out after ${TIMEOUT_MS / 1000}s`)));
       }, TIMEOUT_MS);
 
-      child.on('close', (code) => {
-        clearTimeout(timer);
-        if (child.pid) this.processWatcher.unregister(child.pid);
-
-        if (code !== 0) {
-          reject(new Error(`claude exited ${code}: ${stderr.slice(0, 500)}`));
-          return;
-        }
-        resolve(stdout.trim());
-      });
-
       child.on('error', (err) => {
-        clearTimeout(timer);
-        if (child.pid) this.processWatcher.unregister(child.pid);
-        reject(err);
+        settle(() => reject(err));
       });
+
+      child.on('close', (code) => {
+        if (code !== 0) {
+          settle(() => reject(new Error(`claude exited ${code}: ${stderr.slice(0, 500)}`)));
+        } else {
+          settle(() => resolve(stdout.trim()));
+        }
+      });
+
+      // Check pid only after listeners are attached
+      if (!child.pid) {
+        settle(() => reject(new Error('Failed to spawn claude process')));
+        return;
+      }
+
+      this.processWatcher.register(child.pid, taskId);
     });
   }
 

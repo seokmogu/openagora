@@ -4,6 +4,9 @@ import type { QueuedTask } from '../types/index.js';
 import { ModelRouter } from './router.js';
 import { logger } from '../utils/logger.js';
 
+const STAGE_TIMEOUT_MS = 5 * 60 * 1000; // 5 min max for secondary stages
+const MAX_EMBED_CODE_POINTS = 3000;
+
 /** Maps domain to the most relevant capability route. */
 const DOMAIN_CAPABILITY: Record<DomainType, Capability> = {
   development: 'best-coding',
@@ -15,25 +18,63 @@ const DOMAIN_CAPABILITY: Record<DomainType, Capability> = {
   general:     'best-coding',
 };
 
+export type StageStatus = 'ok' | 'skipped' | 'timeout' | 'error';
+
+export interface StageResult {
+  status: StageStatus;
+  model?: string;
+  output?: string;
+  error?: string;
+}
+
 export interface MultiStageResult {
   taskId: string;
   agentId: string;
   success: boolean;
   primary: ExecutionResult;
-  review?: { model: string; output: string };
-  verify?: { model: string; output: string };
+  review: StageResult;
+  verify: StageResult;
   summary: string;
   durationMs: number;
 }
 
 /**
- * MultiStageOrchestrator runs a task through up to 3 model stages:
- *   1. Primary (claude agent) — main execution
- *   2. Review  (codex)       — quality/completeness check
- *   3. Verify  (gemini)      — independent verification
- *
- * Stages 2-3 are skipped if the capability route has no review/verify model,
- * or if the primary stage failed.
+ * Truncates text safely for embedding in prompts.
+ * - Code-point safe (no split surrogate pairs)
+ * - Preserves head (70%) + tail (30%) for context
+ * - Marks omission with character count
+ */
+function truncateForPrompt(text: string, maxCodePoints = MAX_EMBED_CODE_POINTS): string {
+  const points = Array.from(text);
+  if (points.length <= maxCodePoints) return text;
+  const headLen = Math.floor(maxCodePoints * 0.7);
+  const tailLen = maxCodePoints - headLen;
+  const omitted = points.length - headLen - tailLen;
+  return [
+    '```\n',
+    points.slice(0, headLen).join(''),
+    `\n\n[... ${omitted} characters omitted ...]\n\n`,
+    points.slice(-tailLen).join(''),
+    '\n```',
+  ].join('');
+}
+
+/** Races a promise against a deadline. Rejects with a timeout error on expiry. */
+async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: NodeJS.Timeout;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+  });
+  try {
+    return await Promise.race([promise, deadline]);
+  } finally {
+    clearTimeout(timer!);
+  }
+}
+
+/**
+ * MultiStageOrchestrator: primary(claude) → review(codex) → verify(gemini).
+ * Secondary stages have hard timeouts and return typed StageResult.
  */
 export class MultiStageOrchestrator {
   private readonly modelRouter: ModelRouter;
@@ -71,24 +112,22 @@ export class MultiStageOrchestrator {
         agentId,
         success: false,
         primary,
-        summary: `Primary stage failed: ${primary.output.slice(0, 200)}`,
+        review: { status: 'skipped' },
+        verify: { status: 'skipped' },
+        summary: primary.output,
         durationMs: Date.now() - start,
       };
     }
 
-    // Stage 2: Review (e.g. codex)
-    let review: MultiStageResult['review'];
-    if (route.review) {
-      review = await this.runReview(task, primary.output, capability);
-    }
+    // Stage 2: Review (e.g. codex) — best-effort with timeout
+    const review: StageResult = route.review
+      ? await this.runStage('review', task, primary.output, capability)
+      : { status: 'skipped' };
 
-    // Stage 3: Verify (e.g. gemini)
-    let verify: MultiStageResult['verify'];
-    if (route.verify) {
-      verify = await this.runVerify(task, primary.output, capability);
-    }
-
-    const summary = this.buildSummary(primary.output, review, verify);
+    // Stage 3: Verify (e.g. gemini) — best-effort with timeout
+    const verify: StageResult = route.verify
+      ? await this.runStage('verify', task, primary.output, capability)
+      : { status: 'skipped' };
 
     return {
       taskId: task.id,
@@ -97,79 +136,85 @@ export class MultiStageOrchestrator {
       primary,
       review,
       verify,
-      summary,
+      summary: this.buildSummary(primary.output, review, verify),
       durationMs: Date.now() - start,
     };
   }
 
-  private async runReview(
+  private async runStage(
+    role: 'review' | 'verify',
     task: QueuedTask,
     primaryOutput: string,
     capability: Capability,
-  ): Promise<{ model: string; output: string } | undefined> {
-    const prompt = [
-      `Review the following output for a task: "${task.message.content.slice(0, 300)}"`,
-      '',
-      'Output to review:',
-      primaryOutput.slice(0, 3000),
-      '',
-      'Provide a concise review focusing on: correctness, completeness, quality.',
-      'Rate overall: PASS / NEEDS_IMPROVEMENT / FAIL',
-    ].join('\n');
+  ): Promise<StageResult> {
+    const truncated = truncateForPrompt(primaryOutput);
+    const prompt = role === 'review'
+      ? this.reviewPrompt(task.message.content, truncated)
+      : this.verifyPrompt(task.message.content, truncated);
 
     try {
-      const result = await this.modelRouter.run(capability, prompt, 'review');
-      logger.info('MultiStageOrchestrator: review complete', { taskId: task.id, model: result.model });
-      return { model: result.model, output: result.output };
+      const result = await withTimeout(
+        this.modelRouter.run(capability, prompt, role),
+        STAGE_TIMEOUT_MS,
+        `${role} stage`,
+      );
+      logger.info(`MultiStageOrchestrator: ${role} ok`, { taskId: task.id, model: result.model });
+      return { status: 'ok', model: result.model, output: result.output };
     } catch (err) {
-      logger.warn('MultiStageOrchestrator: review failed, skipping', {
+      const msg = err instanceof Error ? err.message : String(err);
+      const isTimeout = msg.includes('timed out');
+      logger.warn(`MultiStageOrchestrator: ${role} ${isTimeout ? 'timeout' : 'error'}`, {
         taskId: task.id,
-        err: err instanceof Error ? err.message : String(err),
+        err: msg,
       });
-      return undefined;
+      return {
+        status: isTimeout ? 'timeout' : 'error',
+        error: msg,
+      };
     }
   }
 
-  private async runVerify(
-    task: QueuedTask,
-    primaryOutput: string,
-    capability: Capability,
-  ): Promise<{ model: string; output: string } | undefined> {
-    const prompt = [
-      `Independently verify the following result for the task: "${task.message.content.slice(0, 300)}"`,
+  private reviewPrompt(taskContent: string, truncatedOutput: string): string {
+    return [
+      `Review the following output for the task: "${truncateForPrompt(taskContent, 300)}"`,
       '',
-      'Result to verify:',
-      primaryOutput.slice(0, 3000),
+      'Output to review (may be truncated):',
+      truncatedOutput,
       '',
-      'Check for factual accuracy, logical consistency, and completeness.',
-      'Conclude with: VERIFIED / PARTIALLY_VERIFIED / UNVERIFIED',
+      'Assess: correctness, completeness, quality.',
+      'Conclude with one of: PASS / NEEDS_IMPROVEMENT / FAIL',
     ].join('\n');
+  }
 
-    try {
-      const result = await this.modelRouter.run(capability, prompt, 'verify');
-      logger.info('MultiStageOrchestrator: verify complete', { taskId: task.id, model: result.model });
-      return { model: result.model, output: result.output };
-    } catch (err) {
-      logger.warn('MultiStageOrchestrator: verify failed, skipping', {
-        taskId: task.id,
-        err: err instanceof Error ? err.message : String(err),
-      });
-      return undefined;
-    }
+  private verifyPrompt(taskContent: string, truncatedOutput: string): string {
+    return [
+      `Independently verify this result for the task: "${truncateForPrompt(taskContent, 300)}"`,
+      '',
+      'Result to verify (may be truncated):',
+      truncatedOutput,
+      '',
+      'Check: factual accuracy, logical consistency, completeness.',
+      'Conclude with one of: VERIFIED / PARTIALLY_VERIFIED / UNVERIFIED',
+    ].join('\n');
   }
 
   private buildSummary(
     primaryOutput: string,
-    review?: { model: string; output: string },
-    verify?: { model: string; output: string },
+    review: StageResult,
+    verify: StageResult,
   ): string {
     const parts: string[] = [primaryOutput];
 
-    if (review) {
+    if (review.status === 'ok' && review.output) {
       parts.push(`\n---\n**Review (${review.model}):**\n${review.output}`);
+    } else if (review.status !== 'skipped') {
+      parts.push(`\n---\n**Review:** ${review.status}${review.error ? ` — ${review.error}` : ''}`);
     }
-    if (verify) {
+
+    if (verify.status === 'ok' && verify.output) {
       parts.push(`\n---\n**Verify (${verify.model}):**\n${verify.output}`);
+    } else if (verify.status !== 'skipped') {
+      parts.push(`\n---\n**Verify:** ${verify.status}${verify.error ? ` — ${verify.error}` : ''}`);
     }
 
     return parts.join('\n');
