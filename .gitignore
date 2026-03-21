@@ -156,6 +156,13 @@ secret-*.*
 .aws/credentials
 
 # ===========================================
+# OMC State Files (session-local, never commit)
+# ===========================================
+.omc/state/
+.omc/notepad.md
+.omc/project-memory.json
+
+# ===========================================
 # Claude Code Configuration
 # ===========================================
 .claude/settings.local.json

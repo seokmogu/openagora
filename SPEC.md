@@ -98,18 +98,48 @@
 
 생성된 에이전트는 `.claude/agents/moai/` 에 저장되고 git으로 관리됨.
 
-### 3.2 도메인 에이전트 (기본 제공)
+### 3.2 2-레이어 에이전트 아키텍처
 
-| 에이전트 | 도메인 | 모델 | 역할 |
-|---------|--------|------|------|
-| expert-planner | 기획 | Opus | PRD, 로드맵, 마일스톤, EARS 스펙 |
-| expert-analyst | 분석 | Sonnet | 데이터 분석, 시각화, 인사이트 |
-| expert-researcher | 연구 | Opus | 문헌 검색, 웹 리서치, 종합 보고 |
-| expert-writer | 논문 | Opus | 학술 작성, 레퍼런스, 포매팅 |
-| expert-dba | DB | Sonnet | 스키마 설계, 마이그레이션, 최적화 |
-| expert-backend | 개발 | Sonnet | API, 서비스, 테스트 |
+도메인 에이전트는 두 레이어로 구성됨:
 
-### 3.3 P2P 에이전트 통신
+```
+[레이어 1] 도메인 진입점 에이전트 (.claude/agents/*.md)
+  └─ openagora Node.js → claude --agent expert-developer 스폰
+  └─ 단순 작업은 직접 처리
+  └─ 복잡 작업은 moai 워크플로우로 위임
+
+[레이어 2] moai-adk 내부 에이전트 (Claude Code 세션 안)
+  └─ manager-spec, manager-tdd, manager-ddd, manager-docs
+  └─ expert-backend, expert-frontend, expert-testing, expert-security
+  └─ 품질 게이트, LSP 검사, 테스트 커버리지
+```
+
+**실행 흐름 예시 (개발 작업):**
+```
+Slack "API 개발해줘"
+  → openagora Node.js
+  → claude --agent expert-developer (레이어 1 진입)
+    → /moai plan "API 개발"         (manager-spec)
+    → /moai run SPEC-001            (expert-backend + manager-tdd)
+    → /moai review SPEC-001         (manager-quality)
+    → /moai sync SPEC-001           (manager-docs)
+  → 결과를 Slack으로 회신
+```
+
+moai 스킬은 레이어 2 전체를 제공하므로 유지. 레이어 1 에이전트가 moai를 적극 활용.
+
+### 3.3 도메인 에이전트 (레이어 1 진입점)
+
+| 에이전트 | 도메인 | 위임 대상 (moai) | 역할 |
+|---------|--------|-----------------|------|
+| expert-planner | 기획 | manager-spec, manager-strategy | PRD, 로드맵, SPEC 문서 |
+| expert-analyst | 분석 | expert-backend, manager-tdd | 데이터 파이프라인, 시각화 |
+| expert-researcher | 연구 | — (WebSearch/Exa MCP 직접) | 문헌 검색, 종합 보고 |
+| expert-writer | 논문/문서 | manager-docs, Notion MCP | 학술 작성, 문서 발행 |
+| expert-dba | DB | expert-backend, manager-tdd | 스키마 설계, 마이그레이션 |
+| expert-developer | 개발 | expert-backend/frontend, manager-tdd | 전체 개발 워크플로우 |
+
+### 3.4 P2P 에이전트 통신
 
 에이전트는 Orchestrator를 거치지 않고 직접 대화:
 

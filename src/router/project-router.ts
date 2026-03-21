@@ -1,3 +1,4 @@
+import { join } from 'node:path';
 import type { AppConfig } from '../config/loader.js';
 import type { ChannelMessage, DomainType } from '../types/index.js';
 import { logger } from '../utils/logger.js';
@@ -6,6 +7,7 @@ import { ProjectCreator } from './project-creator.js';
 import { ProjectQueue } from '../queue/project-queue.js';
 import { AgentRegistry } from '../agents/registry.js';
 import { AgentExecutor } from '../agents/executor.js';
+import { MultiStageOrchestrator } from '../models/multi-stage.js';
 import { ProcessWatcher } from '../health/process-watcher.js';
 
 /** ProjectRouter: the central dispatch hub. */
@@ -15,6 +17,7 @@ export class ProjectRouter {
   private readonly creator: ProjectCreator;
   private readonly queue: ProjectQueue;
   private readonly executor: AgentExecutor;
+  private readonly orchestrator: MultiStageOrchestrator;
 
   private readonly baseDir: string;
   private readonly githubUser: string;
@@ -25,6 +28,10 @@ export class ProjectRouter {
     this.creator = new ProjectCreator(this.projectRegistry);
     this.queue = new ProjectQueue();
     this.executor = new AgentExecutor(processWatcher);
+    this.orchestrator = new MultiStageOrchestrator(
+      this.executor,
+      join(process.cwd(), 'config'),
+    );
 
     this.baseDir = process.env['BASE_PROJECT_DIR'] ?? '/home/hackit/project';
     this.githubUser = process.env['GITHUB_USER'] ?? 'unknown';
@@ -91,28 +98,27 @@ export class ProjectRouter {
 
       // 3. Enqueue — concurrency=1 per project (P1 solution)
       const finalProject = project;
+      const finalDomain = project.domain;
       await this.queue.enqueue(project.id, message, async () => {
         await message.replyFn(
           `🔄 **${agentId}** 에이전트가 작업을 시작합니다...`,
         );
 
-        const result = await this.executor.run(
-          {
-            id: message.id,
-            projectId: finalProject.id,
-            message,
-            priority: 0,
-            enqueuedAt: new Date(),
-            status: 'running',
-          },
-          agentId,
-          finalProject.path,
-        );
+        const task = {
+          id: message.id,
+          projectId: finalProject.id,
+          message,
+          priority: 0,
+          enqueuedAt: new Date(),
+          status: 'running' as const,
+        };
+
+        const result = await this.orchestrator.run(task, agentId, finalProject.path, finalDomain);
 
         if (result.success) {
-          await message.replyFn(formatSuccess(agentId, result.output, result.durationMs));
+          await message.replyFn(formatSuccess(agentId, result.summary, result.durationMs));
         } else {
-          await message.replyFn(formatError(agentId, result.output, result.durationMs));
+          await message.replyFn(formatError(agentId, result.primary.output, result.durationMs));
         }
       });
     } catch (err) {
