@@ -1,7 +1,7 @@
 constitution:
   # Development methodology selection
   # Options: ddd (Domain-Driven Development), tdd (Test-Driven Development)
-  development_mode: "tdd"
+  development_mode: "ddd"
 
   # Enable TRUST 5 quality framework enforcement
   enforce_quality: true
