@@ -7,9 +7,10 @@ import { logger } from './utils/logger.js';
 
 async function main(): Promise<void> {
   const config = await loadConfig();
-  const router = new ProjectRouter(config);
-  const adapters = new AdapterManager(config, router);
+  // HealthDaemon owns ProcessWatcher — init first so router can use it
   const health = new HealthDaemon(config);
+  const router = new ProjectRouter(config, health.getProcessWatcher());
+  const adapters = new AdapterManager(config, router);
 
   await router.init();
   await adapters.startAll();
