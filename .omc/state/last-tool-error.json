@@ -1,0 +1,7 @@
+{
+  "tool_name": "Bash",
+  "tool_input_preview": "{\"command\":\"cd ~/project/openagora && git add -A && git commit -m \\\"$(cat <<'EOF'\\nchore: initialize openagora with moai-adk v2.7.20\\n\\nMulti-agent orchestration system for planning, development, rese...",
+  "error": "Exit code 128\nAuthor identity unknown\n\n*** 내가 누구인지 설정하십시오.\n\n다음을 실행하면,\n\n  git config --global user.email \"you@example.com\"\n  git config --global user.name \"내 이름\"\n\n계정의 기본 신원 정보를 설정합니다.\n--global 옵션을 빼면 이 저장소서만 신원 정보를 설정합니다.\n\nfatal: 메일 주소를 자동 검사할 수 없습니다 ('hackit@home-miniserver.(none)' 찾음)",
+  "timestamp": "2026-03-21T14:55:27.625Z",
+  "retry_count": 1
+}
