@@ -7,6 +7,7 @@ import { DiscordAdapter } from './discord.js';
 import { TelegramAdapter } from './telegram.js';
 import { WebhookAdapter } from './webhook.js';
 import { CliAdapter } from './cli.js';
+import { EmailAdapter } from './email.js';
 
 export class AdapterManager {
   private adapters: BaseAdapter[] = [];
@@ -20,6 +21,9 @@ export class AdapterManager {
     }
     if (process.env['TELEGRAM_BOT_TOKEN']) {
       this.adapters.push(new TelegramAdapter(config));
+    }
+    if (process.env['EMAIL_IMAP_HOST']) {
+      this.adapters.push(new EmailAdapter(config));
     }
     this.adapters.push(new WebhookAdapter(config));
     this.adapters.push(new CliAdapter(config));

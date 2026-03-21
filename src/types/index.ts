@@ -1,4 +1,4 @@
-export type ChannelType = 'slack' | 'discord' | 'telegram' | 'webhook' | 'cli';
+export type ChannelType = 'slack' | 'discord' | 'telegram' | 'email' | 'webhook' | 'cli';
 
 export type DomainType = 'planning' | 'development' | 'database' | 'analysis' | 'research' | 'writing' | 'general';
 
