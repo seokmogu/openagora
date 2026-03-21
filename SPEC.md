@@ -246,23 +246,54 @@ openagora/
 
 ## 7. 멀티모델 라우팅
 
-### 7.1 태스크 타입별 라우팅
+### 7.1 설계 원칙
+
+- **모델명 하드코딩 금지** — 새 모델 출시 시 config만 수정
+- **능력(capability) 기반 라우팅** — "best-coding", "best-writing" 등
+- **최신 자동 반영** — 각 CLI/API의 latest 엔드포인트 사용
+
+### 7.2 능력별 모델 매핑 (`config/models.yaml`)
 
 ```yaml
-routing:
-  code_implement:   claude-sonnet
-  code_review:      codex-cli        # ChatGPT Pro
-  code_verify:      gemini-api
-  planning:         claude-opus
-  research:         perplexity + claude-opus (synthesis)
-  writing:          claude-opus
-  image_generate:   dalle3 or midjourney
-  ui_design:        v0
-  data_analysis:    gemini-api or gpt4o-code-interpreter
-  translation:      claude-sonnet
+capabilities:
+  best-coding:
+    primary:   claude       # Claude Code가 최신 버전 자동 유지
+    review:    codex        # Codex CLI → ChatGPT Pro 최신 자동 사용
+    verify:    gemini       # Gemini API latest 엔드포인트
+
+  best-writing:
+    primary:   claude-opus  # 장문, 논문, 보고서
+
+  best-research:
+    primary:   perplexity   # 웹 검색 + 인용 (sonar-pro)
+    synthesis: claude-opus  # 수집 결과 합성
+
+  best-image:
+    primary:   midjourney   # 최고 품질 (버전 고정 안 함)
+    fallback:  dalle3       # OpenAI API (ChatGPT Pro)
+
+  best-analysis:
+    primary:   gemini       # 긴 컨텍스트, 데이터 분석
+    fallback:  claude-opus
+
+  best-ui:
+    primary:   v0           # Vercel v0 (UI 컴포넌트)
+
+  best-planning:
+    primary:   claude-opus
 ```
 
-### 7.2 검증 파이프라인
+### 7.3 최신 모델 유지 전략
+
+| 도구 | 최신 유지 방법 |
+|------|--------------|
+| Claude | Claude Code가 자동 관리 |
+| Codex CLI | ChatGPT Pro 최신 모델 자동 반영 |
+| Gemini | `gemini-2.5-pro-latest` 엔드포인트 사용 |
+| Midjourney | 버전 고정 없음, 항상 최신 |
+| Perplexity | `sonar-pro` (항상 최신 검색 엔진) |
+
+### 7.4 검증 파이프라인
 
 ```
 구현 (Claude)
