@@ -1,0 +1,21 @@
+channels:
+  slack:
+    enabled: true
+    botToken: ${SLACK_BOT_TOKEN}
+    appToken: ${SLACK_APP_TOKEN}
+
+  discord:
+    enabled: true
+    botToken: ${DISCORD_BOT_TOKEN}
+
+  telegram:
+    enabled: true
+    botToken: ${TELEGRAM_BOT_TOKEN}
+
+  webhook:
+    enabled: true
+    port: 3000
+    secret: ${WEBHOOK_SECRET}
+
+  cli:
+    enabled: true

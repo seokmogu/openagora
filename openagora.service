@@ -1,0 +1,17 @@
+[Unit]
+Description=OpenAgora Multi-Agent Orchestration
+After=network.target
+
+[Service]
+Type=simple
+User=hackit
+WorkingDirectory=/home/hackit/project/openagora
+EnvironmentFile=/home/hackit/project/openagora/.env
+ExecStart=/usr/bin/node dist/index.js
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

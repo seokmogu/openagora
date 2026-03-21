@@ -1,0 +1,24 @@
+version: '3.9'
+
+services:
+  openagora:
+    build: .
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+    env_file:
+      - .env
+    volumes:
+      - /home/hackit/project:/home/hackit/project
+      - /home/hackit/.claude:/home/hackit/.claude:ro
+      - /home/hackit/bin:/home/hackit/bin:ro
+      - ./logs:/app/logs
+      - ./registry:/app/registry
+    network_mode: host
+
+  health-check:
+    image: curlimages/curl:latest
+    command: ["sh", "-c", "while true; do curl -sf http://localhost:3001/health || echo 'Health check failed'; sleep 60; done"]
+    depends_on:
+      - openagora
+    restart: unless-stopped
