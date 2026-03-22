@@ -1,6 +1,6 @@
 import type { ChannelType } from '../types/index.js';
 
-export type CommandVerb = 'run' | 'status' | 'list' | 'help';
+export type CommandVerb = 'run' | 'status' | 'list' | 'help' | 'chat';
 
 export interface ParsedCommand {
   verb: CommandVerb;
@@ -24,25 +24,48 @@ export class CommandParser {
   // @MX:NOTE: [AUTO] Each channel type has distinct prefix conventions; stripping is order-sensitive
   parse(content: string, channel: string): ParseResult {
     const raw = content;
-    const stripped = this.stripPrefix(content.trim(), channel as ChannelType);
+    const trimmed = content.trim();
+    const ch = channel as ChannelType;
+
+    // If no bot prefix detected → treat as casual chat, not a command
+    if (!this.hasPrefix(trimmed, ch)) {
+      return {
+        ok: true,
+        command: { verb: 'chat', projectName: null, taskDescription: trimmed, raw },
+      };
+    }
+
+    const stripped = this.stripPrefix(trimmed, ch);
     return this.parseStripped(stripped, raw);
+  }
+
+  private hasPrefix(content: string, channel: ChannelType): boolean {
+    switch (channel) {
+      case 'discord':
+        return /^(?:!openagora|!agora|@openagora)\s*/i.test(content);
+      case 'slack':
+        return /^(?:@openagora|<@[A-Z0-9]+>)\s*/i.test(content);
+      case 'telegram':
+        return /^\/[a-z]+/i.test(content);
+      case 'cli':
+      case 'webhook':
+        return true; // CLI always treated as command
+      default:
+        return false;
+    }
   }
 
   private stripPrefix(content: string, channel: ChannelType): string {
     switch (channel) {
       case 'discord': {
-        // Strip !openagora, !agora, @openagora (case-insensitive)
         const discordPrefixes = /^(?:!openagora|!agora|@openagora)\s*/i;
         return content.replace(discordPrefixes, '');
       }
       case 'slack': {
-        // Strip @openagora or <@USERID> (any mention)
         const slackPrefixes = /^(?:@openagora|<@[A-Z0-9]+>)\s*/i;
         return content.replace(slackPrefixes, '');
       }
       case 'telegram': {
-        // Strip /run, /status, /list, /help — but keep the verb as the first token
-        // Telegram uses /verb directly, so we transform /verb → verb
         const telegramCmd = /^\/([a-z]+)\s*/i;
         const m = telegramCmd.exec(content);
         if (m) {
@@ -52,7 +75,6 @@ export class CommandParser {
       }
       case 'cli':
       case 'webhook': {
-        // Strip leading "openagora" prefix if present
         const cliPrefix = /^openagora\s+/i;
         return content.replace(cliPrefix, '');
       }

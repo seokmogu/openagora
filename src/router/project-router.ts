@@ -82,6 +82,11 @@ export class ProjectRouter {
       const { command } = parseResult;
 
       // Branch on verb
+      if (command.verb === 'chat') {
+        await this.handleChat(command.taskDescription ?? '', message);
+        return;
+      }
+
       if (command.verb === 'help') {
         await message.replyFn(HELP_MESSAGE);
         return;
@@ -226,6 +231,21 @@ export class ProjectRouter {
         // ignore reply failure
       }
     }
+  }
+
+  /** Handle casual chat without spawning an agent — call claude -p directly. */
+  private async handleChat(content: string, message: ChannelMessage): Promise<void> {
+    const { spawn } = await import('node:child_process');
+    const prompt = `You are a helpful assistant integrated into Discord via OpenAgora. Reply concisely.\n\nUser: ${content}`;
+    const reply = await new Promise<string>((resolve) => {
+      let out = '';
+      const child = spawn('claude', ['-p', prompt], { stdio: ['ignore', 'pipe', 'pipe'] });
+      child.stdout?.on('data', (chunk: Buffer) => { out += chunk.toString(); });
+      child.on('close', () => resolve(out.trim() || '죄송해요, 응답을 생성하지 못했습니다.'));
+      child.on('error', () => resolve('죄송해요, Claude에 연결할 수 없습니다.'));
+      setTimeout(() => { child.kill(); resolve('응답 시간이 초과됐습니다.'); }, 30000);
+    });
+    await message.replyFn(reply);
   }
 
   /** Extract an explicit project name from the message, if present. */
