@@ -144,8 +144,6 @@ describe('ProjectRouter', () => {
     router = new ProjectRouter(makeConfig(), new ProcessWatcher());
   });
 
-  afterEach(() => {});
-
   describe('init()', () => {
     it('loads project registry', async () => {
       await router.init();
