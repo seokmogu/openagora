@@ -1,16 +1,4 @@
 {
   "version": "1.0",
-  "projects": [
-    {
-      "id": "general-r0iku",
-      "name": "general-r0iku",
-      "path": "/home/hackit/project/general-r0iku",
-      "githubRepo": "seokmogu/general-r0iku",
-      "domain": "general",
-      "agents": [],
-      "status": "active",
-      "createdAt": "2026-03-22T12:44:06.147Z",
-      "updatedAt": "2026-03-22T12:44:06.148Z"
-    }
-  ]
+  "projects": []
 }
