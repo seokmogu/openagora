@@ -1,9 +1,113 @@
 [
-  {"id":"expert-planner","name":"Planner Expert","domain":"planning","dynamic":false,"definitionPath":".claude/agents/planner.md","createdAt":"2026-03-21T00:00:00.000Z","capabilities":["task-breakdown","roadmap","requirements-analysis","spec-document"]},
-  {"id":"expert-developer","name":"Developer Expert","domain":"development","dynamic":false,"definitionPath":".claude/agents/developer.md","createdAt":"2026-03-21T00:00:00.000Z","capabilities":["feature-implementation","bug-fix","code-review","testing","moai-workflow"]},
-  {"id":"expert-dba","name":"Database Expert","domain":"database","dynamic":false,"definitionPath":".claude/agents/dba.md","createdAt":"2026-03-21T00:00:00.000Z","capabilities":["schema-design","query-optimization","migration","data-modeling"]},
-  {"id":"expert-analyst","name":"Analyst Expert","domain":"analysis","dynamic":false,"definitionPath":".claude/agents/analyst.md","createdAt":"2026-03-21T00:00:00.000Z","capabilities":["data-exploration","statistical-analysis","reporting","pipeline"]},
-  {"id":"expert-researcher","name":"Researcher Expert","domain":"research","dynamic":false,"definitionPath":".claude/agents/researcher.md","createdAt":"2026-03-21T00:00:00.000Z","capabilities":["literature-review","web-research","fact-checking","synthesis"]},
-  {"id":"expert-writer","name":"Writer Expert","domain":"writing","dynamic":false,"definitionPath":".claude/agents/writer.md","createdAt":"2026-03-21T00:00:00.000Z","capabilities":["academic-writing","technical-docs","notion-publish","reports"]},
-  {"id":"builder-agent","name":"Builder Agent","domain":"general","dynamic":false,"definitionPath":".claude/agents/builder.md","createdAt":"2026-03-21T00:00:00.000Z","capabilities":["create-agent","agent-registry"]}
+  {
+    "id": "expert-planner",
+    "name": "Planner Expert",
+    "domain": "planning",
+    "dynamic": false,
+    "definitionPath": ".claude/agents/planner.md",
+    "createdAt": "2026-03-21T00:00:00.000Z",
+    "capabilities": [
+      "task-breakdown",
+      "roadmap",
+      "requirements-analysis",
+      "spec-document"
+    ]
+  },
+  {
+    "id": "expert-developer",
+    "name": "Developer Expert",
+    "domain": "development",
+    "dynamic": false,
+    "definitionPath": ".claude/agents/developer.md",
+    "createdAt": "2026-03-21T00:00:00.000Z",
+    "capabilities": [
+      "feature-implementation",
+      "bug-fix",
+      "code-review",
+      "testing",
+      "moai-workflow"
+    ]
+  },
+  {
+    "id": "expert-dba",
+    "name": "Database Expert",
+    "domain": "database",
+    "dynamic": false,
+    "definitionPath": ".claude/agents/dba.md",
+    "createdAt": "2026-03-21T00:00:00.000Z",
+    "capabilities": [
+      "schema-design",
+      "query-optimization",
+      "migration",
+      "data-modeling"
+    ]
+  },
+  {
+    "id": "expert-analyst",
+    "name": "Analyst Expert",
+    "domain": "analysis",
+    "dynamic": false,
+    "definitionPath": ".claude/agents/analyst.md",
+    "createdAt": "2026-03-21T00:00:00.000Z",
+    "capabilities": [
+      "data-exploration",
+      "statistical-analysis",
+      "reporting",
+      "pipeline"
+    ]
+  },
+  {
+    "id": "expert-researcher",
+    "name": "Researcher Expert",
+    "domain": "research",
+    "dynamic": false,
+    "definitionPath": ".claude/agents/researcher.md",
+    "createdAt": "2026-03-21T00:00:00.000Z",
+    "capabilities": [
+      "literature-review",
+      "web-research",
+      "fact-checking",
+      "synthesis"
+    ]
+  },
+  {
+    "id": "expert-writer",
+    "name": "Writer Expert",
+    "domain": "writing",
+    "dynamic": false,
+    "definitionPath": ".claude/agents/writer.md",
+    "createdAt": "2026-03-21T00:00:00.000Z",
+    "capabilities": [
+      "academic-writing",
+      "technical-docs",
+      "notion-publish",
+      "reports"
+    ]
+  },
+  {
+    "id": "builder-agent",
+    "name": "Builder Agent",
+    "domain": "general",
+    "dynamic": false,
+    "definitionPath": ".claude/agents/builder.md",
+    "createdAt": "2026-03-21T00:00:00.000Z",
+    "capabilities": [
+      "create-agent",
+      "agent-registry"
+    ]
+  },
+  {
+    "id": "expert-ml",
+    "name": "Ml Expert",
+    "domain": "ml",
+    "dynamic": true,
+    "definitionPath": ".claude/agents/dynamic/ml.md",
+    "createdBy": "builder-agent",
+    "capabilities": [
+      "ml-expertise",
+      "domain-analysis",
+      "structured-output"
+    ],
+    "createdAt": "2026-03-22T12:44:06.150Z"
+  }
 ]
