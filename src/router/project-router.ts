@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import type { AppConfig } from '../config/loader.js';
-import type { ChannelMessage, DomainType } from '../types/index.js';
+import type { ChannelMessage } from '../types/index.js';
 import { logger } from '../utils/logger.js';
 import { ProjectRegistry } from './registry.js';
 import { ProjectCreator } from './project-creator.js';
@@ -166,7 +166,7 @@ export class ProjectRouter {
 
       if (!project) {
         const domain = AgentExecutor.detectDomain(taskContent);
-        const name = command.projectName ?? this.extractProjectName(taskContent) ?? this.generateProjectName(domain);
+        const name = command.projectName ?? this.extractProjectName(taskContent) ?? this.generateProjectName(taskContent);
 
         await message.replyFn(
           `새 프로젝트를 생성합니다: **${name}** (도메인: ${domain})\n잠시 기다려 주세요...`,
@@ -344,9 +344,20 @@ Rules:
     return undefined;
   }
 
-  private generateProjectName(domain: DomainType): string {
-    const suffix = Date.now().toString(36).slice(-5);
-    return `${domain}-${suffix}`;
+  private generateProjectName(taskDescription: string): string {
+    // Derive a readable slug from the task description
+    const slug = taskDescription
+      .toLowerCase()
+      .replace(/[^a-z0-9가-힣\s]/g, '')
+      .trim()
+      .split(/\s+/)
+      .slice(0, 3)
+      .join('-')
+      .replace(/[^a-z0-9-]/g, '')  // strip non-ASCII after join
+      .slice(0, 30)
+      || 'project';
+    const suffix = Date.now().toString(36).slice(-4);
+    return `${slug}-${suffix}`;
   }
 
   /** Expose queue stats for health monitoring. */
