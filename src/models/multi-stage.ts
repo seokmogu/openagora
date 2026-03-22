@@ -3,6 +3,8 @@ import type { AgentExecutor, ExecutionResult } from '../agents/executor.js';
 import type { QueuedTask } from '../types/index.js';
 import { ModelRouter } from './router.js';
 import { logger } from '../utils/logger.js';
+import { RalphLoop } from '../health/ralph-loop.js';
+import { P2PRouter } from '../agents/p2p-router.js';
 
 const STAGE_TIMEOUT_MS = 5 * 60 * 1000; // 5 min max for secondary stages
 const MAX_EMBED_CODE_POINTS = 3000;
@@ -36,6 +38,8 @@ export interface MultiStageResult {
   verify: StageResult;
   summary: string;
   durationMs: number;
+  iterations: number;
+  convergedReason?: 'verified' | 'quality-gates' | 'stagnation' | 'max-iterations';
 }
 
 /**
@@ -82,6 +86,7 @@ export class MultiStageOrchestrator {
   constructor(
     private readonly executor: AgentExecutor,
     configDir: string,
+    private readonly p2pRouter?: P2PRouter,
   ) {
     this.modelRouter = new ModelRouter(configDir);
   }
@@ -104,7 +109,7 @@ export class MultiStageOrchestrator {
     });
 
     // Stage 1: Primary execution via claude agent subprocess
-    const primary = await this.executor.run(task, agentId, projectPath);
+    let primary = await this.executor.run(task, agentId, projectPath);
 
     if (!primary.success) {
       return {
@@ -116,7 +121,30 @@ export class MultiStageOrchestrator {
         verify: { status: 'skipped' },
         summary: primary.output,
         durationMs: Date.now() - start,
+        iterations: 0,
       };
+    }
+
+    // P2P delegation: check if primary output contains DELEGATE blocks
+    if (this.p2pRouter) {
+      const delegations = P2PRouter.parse(primary.output);
+      if (delegations.length > 0) {
+        logger.info('MultiStageOrchestrator: P2P delegations found', {
+          taskId: task.id,
+          count: delegations.length,
+        });
+        const p2pOutputs = await this.p2pRouter.route(
+          delegations,
+          task.message,
+          projectPath,
+          task.id,
+        );
+        // Append P2P results to primary output for downstream review/verify
+        primary = {
+          ...primary,
+          output: [primary.output, ...p2pOutputs].join('\n\n---\n'),
+        };
+      }
     }
 
     // Stage 2: Review (e.g. codex) — best-effort with timeout
@@ -124,10 +152,76 @@ export class MultiStageOrchestrator {
       ? await this.runStage('review', task, primary.output, capability)
       : { status: 'skipped' };
 
-    // Stage 3: Verify (e.g. gemini) — best-effort with timeout
-    const verify: StageResult = route.verify
+    // Stage 3: Verify (e.g. gemini) — best-effort with timeout, with RalphLoop retry
+    let verify: StageResult = route.verify
       ? await this.runStage('verify', task, primary.output, capability)
       : { status: 'skipped' };
+
+    let iterations = 0;
+    let convergedReason: MultiStageResult['convergedReason'];
+
+    if (route.verify && verify.status === 'ok' && verify.output !== undefined) {
+      const isVerified = this.isVerifyPassing(verify.output);
+
+      if (isVerified) {
+        convergedReason = 'verified';
+      } else {
+        // Enter RalphLoop retry cycle
+        const ralph = new RalphLoop({ maxIterations: 5 });
+        let previousVerifyText: string | undefined;
+        let currentTask = task;
+
+        while (true) {
+          const verifyText = verify.output ?? '';
+
+          // Stagnation detection: same feedback text as previous round → force converge
+          if (previousVerifyText !== undefined && verifyText === previousVerifyText) {
+            logger.info('MultiStageOrchestrator: verify text stagnant, converging', {
+              taskId: task.id,
+              iteration: iterations,
+            });
+            convergedReason = 'stagnation';
+            break;
+          }
+
+          const feedback = this.verifyOutputToFeedback(verifyText);
+          const decision = ralph.decide(feedback);
+          iterations = ralph.getIterations();
+
+          if (decision === 'converge') {
+            convergedReason = feedback.buildSuccess ? 'quality-gates' : 'stagnation';
+            break;
+          }
+
+          if (decision === 'abort' || decision === 'request-review') {
+            convergedReason = 'max-iterations';
+            break;
+          }
+
+          // decision === 'continue': retry primary with feedback appended
+          previousVerifyText = verifyText;
+          currentTask = this.taskWithFeedback(currentTask, verifyText);
+          primary = await this.executor.run(currentTask, agentId, projectPath);
+
+          if (!primary.success) {
+            convergedReason = 'max-iterations';
+            break;
+          }
+
+          verify = await this.runStage('verify', task, primary.output, capability);
+
+          if (verify.status !== 'ok' || verify.output === undefined) {
+            convergedReason = 'max-iterations';
+            break;
+          }
+
+          if (this.isVerifyPassing(verify.output)) {
+            convergedReason = 'verified';
+            break;
+          }
+        }
+      }
+    }
 
     return {
       taskId: task.id,
@@ -138,6 +232,53 @@ export class MultiStageOrchestrator {
       verify,
       summary: this.buildSummary(primary.output, review, verify),
       durationMs: Date.now() - start,
+      iterations,
+      convergedReason,
+    };
+  }
+
+  /** Returns true if verify output contains VERIFIED (but not UNVERIFIED). */
+  private isVerifyPassing(output: string): boolean {
+    // UNVERIFIED contains "VERIFIED" so check UNVERIFIED first
+    const upper = output.toUpperCase();
+    return upper.includes('VERIFIED') && !upper.includes('UNVERIFIED');
+  }
+
+  /** Maps verify text output to a RalphLoop Feedback object. */
+  private verifyOutputToFeedback(output: string): {
+    testCount: number;
+    lintErrors: number;
+    buildSuccess: boolean;
+    coveragePct: number;
+    timestamp: Date;
+  } {
+    const upper = output.toUpperCase();
+    const isVerified = upper.includes('VERIFIED') && !upper.includes('UNVERIFIED');
+    const isPartial = upper.includes('PARTIALLY_VERIFIED');
+    return {
+      buildSuccess: isVerified,
+      lintErrors: isVerified || isPartial ? 0 : 1,
+      testCount: isVerified ? 1 : 0,
+      coveragePct: isVerified ? 100 : isPartial ? 50 : 0,
+      timestamp: new Date(),
+    };
+  }
+
+  /** Returns a shallow-cloned task with feedback appended to message content. */
+  private taskWithFeedback(task: QueuedTask, feedback: string): QueuedTask {
+    const truncated = truncateForPrompt(feedback, 500);
+    return {
+      ...task,
+      message: {
+        ...task.message,
+        content: [
+          task.message.content,
+          '',
+          '---',
+          'Previous verification feedback (address these issues):',
+          truncated,
+        ].join('\n'),
+      },
     };
   }
 

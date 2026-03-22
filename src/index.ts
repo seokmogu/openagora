@@ -10,6 +10,9 @@ async function main(): Promise<void> {
   // HealthDaemon owns ProcessWatcher — init first so router can use it
   const health = new HealthDaemon(config);
   const router = new ProjectRouter(config, health.getProcessWatcher());
+  health.setRouter(router);
+  router.setNotifier(health.getNotifier());
+  health.setDiscoveryCallback(task => router.handleDiscoveredTask(task));
   const adapters = new AdapterManager(config, router);
 
   await router.init();

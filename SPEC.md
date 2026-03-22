@@ -381,31 +381,31 @@ Circuit Breaker: 5회 연속 실패 → 차단 + 알림
 ## 10. 구현 단계
 
 ### Phase 1 — 핵심 인프라 (1주)
-- [ ] Channel Adapter (Slack + Discord + Webhook + CLI)
-- [ ] Project Router + Registry
-- [ ] Project 생성 자동화 (git repo 자동 생성)
-- [ ] Health Monitor (Daemon + Circuit Breaker + SIGKILL)
+- [x] Channel Adapter (Slack + Discord + Webhook + CLI)
+- [x] Project Router + Registry
+- [x] Project 생성 자동화 (git repo 자동 생성)
+- [x] Health Monitor (Daemon + Circuit Breaker + SIGKILL)
 
 ### Phase 2 — 에이전트 시스템 (1주)
-- [ ] 6개 도메인 Expert 에이전트 정의
-- [ ] Builder Agent (동적 에이전트 생성)
-- [ ] P2P 에이전트 통신
-- [ ] Git Worktree 격리 자동화
+- [x] 6개 도메인 Expert 에이전트 정의
+- [x] Builder Agent (동적 에이전트 생성)
+- [x] P2P 에이전트 통신
+- [x] Git Worktree 격리 자동화
 
 ### Phase 3 — 멀티모델 (1주)
-- [ ] 모델 라우터
-- [ ] Codex CLI 통합
-- [ ] Gemini API 통합
-- [ ] 이미지 생성 (DALL-E 3)
+- [x] 모델 라우터
+- [x] Codex CLI 통합
+- [x] Gemini API 통합
+- [x] 이미지 생성 (DALL-E 3)
 
 ### Phase 4 — 외부 도구 (1주)
-- [ ] MCP 서버 설정 (Notion, GitHub, Perplexity, etc.)
-- [ ] Telegram 채널 어댑터
-- [ ] Webhook 어댑터
-- [ ] 관리 UI (선택)
+- [x] MCP 서버 설정 (Notion, GitHub, Perplexity, etc.)
+- [x] Telegram 채널 어댑터
+- [x] Webhook 어댑터
+- [ ] 관리 UI (선택 — 미구현)
 
 ### Phase 5 — 자율 운영 (1주)
-- [ ] Ralph 루프 + 스태그네이션 감지
-- [ ] 24/7 데몬 (systemd)
-- [ ] 자율 태스크 발견
-- [ ] 알림 시스템 (Slack/Telegram)
+- [x] Ralph 루프 + 스태그네이션 감지
+- [x] 24/7 데몬 (systemd)
+- [x] 자율 태스크 발견
+- [x] 알림 시스템 (Slack/Telegram)

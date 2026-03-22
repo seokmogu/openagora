@@ -150,6 +150,11 @@ export class AgentRegistry {
     return this.entries.some((e) => e.id === agentId);
   }
 
+  /** Returns true if the agentId is known in the registry. */
+  isKnown(agentId: string): boolean {
+    return this.entries.some((e) => e.id === agentId);
+  }
+
   /** Get definition path for an agent. */
   getDefinitionPath(agentId: string): string | undefined {
     return this.entries.find((e) => e.id === agentId)?.definitionPath;

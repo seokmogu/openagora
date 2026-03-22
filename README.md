@@ -268,6 +268,15 @@ npm run build --production
 
 ### Testing
 
+**Current coverage: 25 test files, 232 tests** (SPEC-TEST-001)
+
+Test suites:
+- Core: AgentExecutor, MultiStageOrchestrator, AdapterManager, HealthDaemon, ProjectRouter
+- Adapters: Slack, Discord, Webhook, Base, Telegram, CLI
+- Agents: AgentRegistry, P2PRouter
+- Health: RalphLoop, Notifier, HealthMonitor, WorktreeManager, ProcessWatcher, TaskDiscovery
+- Config: loader, ProjectRegistry, ProjectCreator, ModelRouter
+
 ```bash
 # Run all tests
 npm test
