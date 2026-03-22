@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ModelRouter } from '../router.js';
 import { join } from 'node:path';
 
@@ -13,8 +13,6 @@ vi.mock('../../utils/logger.js', () => ({
     error: vi.fn(),
   },
 }));
-
-import { vi } from 'vitest';
 
 describe('ModelRouter', () => {
   let router: ModelRouter;

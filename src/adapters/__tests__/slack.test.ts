@@ -15,11 +15,12 @@ const mockAppInstance = vi.hoisted(() => ({
   },
 }));
 
-vi.mock('@slack/bolt', () => ({
-  App: vi.fn().mockImplementation(function () {
+vi.mock('@slack/bolt', () => {
+  const AppFn = vi.fn().mockImplementation(function () {
     return mockAppInstance;
-  }),
-}));
+  });
+  return { App: AppFn, default: { App: AppFn } };
+});
 
 import { SlackAdapter } from '../slack.js';
 import { App } from '@slack/bolt';

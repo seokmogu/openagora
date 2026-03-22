@@ -1,4 +1,5 @@
-import { App } from '@slack/bolt';
+import boltPkg from '@slack/bolt';
+const { App } = boltPkg;
 import { ChannelType, ChannelMessage } from '../types/index.js';
 import { AppConfig } from '../config/loader.js';
 import { BaseAdapter } from './base.js';
@@ -6,7 +7,7 @@ import { logger } from '../utils/logger.js';
 
 export class SlackAdapter extends BaseAdapter {
   readonly type: ChannelType = 'slack';
-  private app?: App;
+  private app?: InstanceType<typeof App>;
 
   constructor(config: AppConfig) {
     super(config);

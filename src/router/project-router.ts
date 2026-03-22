@@ -7,8 +7,11 @@ import { ProjectCreator } from './project-creator.js';
 import { ProjectQueue } from '../queue/project-queue.js';
 import { AgentRegistry } from '../agents/registry.js';
 import { AgentExecutor } from '../agents/executor.js';
+import { BuilderAgent } from '../agents/builder-agent.js';
 import { MultiStageOrchestrator } from '../models/multi-stage.js';
+import { P2PRouter } from '../agents/p2p-router.js';
 import { ProcessWatcher } from '../health/process-watcher.js';
+import { Notifier } from '../health/notifier.js';
 
 /** ProjectRouter: the central dispatch hub. */
 export class ProjectRouter {
@@ -17,7 +20,9 @@ export class ProjectRouter {
   private readonly creator: ProjectCreator;
   private readonly queue: ProjectQueue;
   private readonly executor: AgentExecutor;
+  private readonly p2pRouter: P2PRouter;
   private readonly orchestrator: MultiStageOrchestrator;
+  private notifier?: Notifier;
 
   private readonly baseDir: string;
   private readonly githubUser: string;
@@ -28,13 +33,19 @@ export class ProjectRouter {
     this.creator = new ProjectCreator(this.projectRegistry);
     this.queue = new ProjectQueue();
     this.executor = new AgentExecutor(processWatcher);
+    this.p2pRouter = new P2PRouter(this.executor, this.agentRegistry);
     this.orchestrator = new MultiStageOrchestrator(
       this.executor,
       join(process.cwd(), 'config'),
+      this.p2pRouter,
     );
 
     this.baseDir = process.env['BASE_PROJECT_DIR'] ?? '/home/hackit/project';
     this.githubUser = process.env['GITHUB_USER'] ?? 'unknown';
+  }
+
+  setNotifier(n: Notifier): void {
+    this.notifier = n;
   }
 
   async init(): Promise<void> {
@@ -80,7 +91,29 @@ export class ProjectRouter {
       }
 
       // 2. Get agent for domain
-      const agentId = this.agentRegistry.getAgentForDomain(project.domain);
+      let agentId = this.agentRegistry.getAgentForDomain(project.domain);
+
+      // 2a. If domain is 'general' and content is substantial, try BuilderAgent
+      if (project.domain === 'general' && message.content.length > 100) {
+        const novelDomain = extractNovelDomain(message.content);
+        try {
+          const builder = new BuilderAgent(process.cwd(), this.agentRegistry);
+          const buildResult = await builder.create({
+            domain: novelDomain,
+            name: `${novelDomain.charAt(0).toUpperCase()}${novelDomain.slice(1)} Expert`,
+            description: `Specialized agent for ${novelDomain} tasks`,
+            responsibilities: [`Handle ${novelDomain} domain requests`, 'Produce structured outputs', 'Apply domain expertise'],
+            capabilities: [`${novelDomain}-expertise`, 'domain-analysis', 'structured-output'],
+            tools: ['Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep'],
+          });
+          agentId = buildResult.agentId;
+          logger.info('ProjectRouter: BuilderAgent created specialized agent', { novelDomain, agentId });
+        } catch (builderErr) {
+          const msg = builderErr instanceof Error ? builderErr.message : String(builderErr);
+          logger.warn('ProjectRouter: BuilderAgent failed, falling back to expert-developer', { err: msg });
+          agentId = 'expert-developer';
+        }
+      }
 
       logger.info('ProjectRouter: routing task', {
         projectId: project.id,
@@ -117,8 +150,10 @@ export class ProjectRouter {
 
         if (result.success) {
           await message.replyFn(formatSuccess(agentId, result.summary, result.durationMs));
+          void this.notifier?.send({ title: 'Task completed', body: result.summary.slice(0, 300), level: 'success', projectId: finalProject.id, agentId, durationMs: result.durationMs });
         } else {
           await message.replyFn(formatError(agentId, result.primary.output, result.durationMs));
+          void this.notifier?.send({ title: 'Task failed', body: result.primary.output.slice(0, 200), level: 'error', projectId: finalProject.id, agentId, durationMs: result.durationMs });
         }
       });
     } catch (err) {
@@ -160,6 +195,57 @@ export class ProjectRouter {
   getActiveProjects(): string[] {
     return this.queue.getActiveProjects();
   }
+
+  async handleDiscoveredTask(task: import('../health/task-discovery.js').DiscoveredTask): Promise<void> {
+    const project = await this.projectRegistry.get(task.projectId);
+    if (!project) {
+      logger.warn('ProjectRouter: discovered task for unknown project', { projectId: task.projectId });
+      return;
+    }
+
+    const syntheticMessage: ChannelMessage = {
+      id: `discovery-${Date.now()}`,
+      channel: 'cli',
+      channelId: 'discovery',
+      userId: 'system',
+      content: task.content,
+      timestamp: new Date(),
+      replyFn: async (reply) => {
+        logger.info('TaskDiscovery reply', { projectId: task.projectId, reply: reply.slice(0, 200) });
+      },
+    };
+
+    await this.handleMessage(syntheticMessage);
+  }
+}
+
+/** Extract a potential novel domain name from message content. */
+function extractNovelDomain(content: string): string {
+  const lower = content.toLowerCase();
+  const domainKeywords = [
+    'blockchain', 'crypto', 'defi', 'nft',
+    'legal', 'law', 'contract',
+    'medical', 'health', 'clinical',
+    'finance', 'trading', 'investment',
+    'marketing', 'seo', 'advertising',
+    'education', 'teaching', 'learning',
+    'logistics', 'supply', 'inventory',
+    'security', 'cybersecurity', 'infosec',
+    'gaming', 'game', 'unity',
+    'ai', 'machine learning', 'ml',
+    'devops', 'infrastructure', 'cloud',
+    'design', 'ui', 'ux',
+    'mobile', 'ios', 'android',
+  ];
+
+  for (const keyword of domainKeywords) {
+    if (lower.includes(keyword)) {
+      // Normalize multi-word keywords to single identifier
+      return keyword.replace(/\s+/g, '-');
+    }
+  }
+
+  return 'specialist';
 }
 
 function formatSuccess(agentId: string, output: string, durationMs: number): string {

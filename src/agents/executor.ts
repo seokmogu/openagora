@@ -3,6 +3,7 @@ import type { QueuedTask } from '../types/index.js';
 import { logger } from '../utils/logger.js';
 import { CircuitBreakerRegistry } from '../health/circuit-breaker.js';
 import { ProcessWatcher } from '../health/process-watcher.js';
+import { WorktreeManager } from '../health/worktree.js';
 
 const TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes per task
 
@@ -73,10 +74,29 @@ export class AgentExecutor {
     ].join('\n');
   }
 
-  private spawnClaude(
+  private async spawnClaude(
     prompt: string,
     agentId: string,
     projectPath: string,
+    taskId: string,
+  ): Promise<string> {
+    // Create isolated worktree for this task (P4 fix)
+    const worktreePath = await WorktreeManager.create(projectPath, taskId);
+    const cwd = worktreePath ?? projectPath;
+
+    try {
+      return await this.spawnClaudeInDir(prompt, agentId, cwd, taskId);
+    } finally {
+      if (worktreePath) {
+        await WorktreeManager.remove(projectPath, taskId);
+      }
+    }
+  }
+
+  private spawnClaudeInDir(
+    prompt: string,
+    agentId: string,
+    cwd: string,
     taskId: string,
   ): Promise<string> {
     return new Promise((resolve, reject) => {
@@ -84,7 +104,7 @@ export class AgentExecutor {
       const args = ['-p', '--agent', agentId, '--dangerously-skip-permissions', prompt];
 
       const child = spawn('claude', args, {
-        cwd: projectPath,
+        cwd,
         stdio: ['ignore', 'pipe', 'pipe'],
         env: { ...process.env },
         detached: true, // allows process group kill
