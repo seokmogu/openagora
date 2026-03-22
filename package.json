@@ -4,10 +4,15 @@
   "type": "module",
   "description": "Open multi-agent orchestration platform",
   "main": "dist/index.js",
+  "bin": {
+    "openagora": "./bin/openagora.js"
+  },
   "scripts": {
     "build": "tsc",
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
+    "cli": "tsx src/cli/main.ts",
+    "cli:setup": "tsx src/cli/main.ts setup",
     "lint": "eslint src --ext .ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
