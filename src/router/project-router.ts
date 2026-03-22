@@ -12,6 +12,7 @@ import { MultiStageOrchestrator } from '../models/multi-stage.js';
 import { P2PRouter } from '../agents/p2p-router.js';
 import { ProcessWatcher } from '../health/process-watcher.js';
 import { Notifier } from '../health/notifier.js';
+import { CommandParser, HELP_MESSAGE } from './command-parser.js';
 
 /** ProjectRouter: the central dispatch hub. */
 export class ProjectRouter {
@@ -22,6 +23,7 @@ export class ProjectRouter {
   private readonly executor: AgentExecutor;
   private readonly p2pRouter: P2PRouter;
   private readonly orchestrator: MultiStageOrchestrator;
+  private readonly commandParser: CommandParser;
   private notifier?: Notifier;
 
   private readonly baseDir: string;
@@ -40,6 +42,7 @@ export class ProjectRouter {
       this.p2pRouter,
     );
 
+    this.commandParser = new CommandParser();
     this.baseDir = process.env['BASE_PROJECT_DIR'] ?? '/home/hackit/project';
     this.githubUser = process.env['GITHUB_USER'] ?? 'unknown';
   }
@@ -66,12 +69,68 @@ export class ProjectRouter {
     });
 
     try {
+      // 0. Parse command
+      const parseResult = this.commandParser.parse(message.content, message.channel);
+
+      if (!parseResult.ok) {
+        await message.replyFn(
+          `❌ ${parseResult.error.error}\n💡 ${parseResult.error.suggestion}`,
+        );
+        return;
+      }
+
+      const { command } = parseResult;
+
+      // Branch on verb
+      if (command.verb === 'help') {
+        await message.replyFn(HELP_MESSAGE);
+        return;
+      }
+
+      if (command.verb === 'list') {
+        const active = this.getActiveProjects();
+        if (active.length === 0) {
+          await message.replyFn('활성 프로젝트가 없습니다.');
+        } else {
+          await message.replyFn(`활성 프로젝트 (${active.length}개):\n${active.map((p) => `• ${p}`).join('\n')}`);
+        }
+        return;
+      }
+
+      if (command.verb === 'status') {
+        const stats = this.getQueueStats();
+        if (command.projectName) {
+          const stat = stats[command.projectName];
+          if (!stat) {
+            await message.replyFn(`프로젝트 **${command.projectName}**을(를) 찾을 수 없습니다.`);
+          } else {
+            await message.replyFn(
+              `📊 **${command.projectName}** 상태\n• 대기 중: ${stat.pending}개\n• 큐 크기: ${stat.size}개`,
+            );
+          }
+        } else {
+          const entries = Object.entries(stats);
+          if (entries.length === 0) {
+            await message.replyFn('현재 활성 큐가 없습니다.');
+          } else {
+            const lines = entries.map(([name, s]) => `• **${name}**: 대기 ${s.pending}개 / 큐 ${s.size}개`);
+            await message.replyFn(`📊 전체 큐 상태:\n${lines.join('\n')}`);
+          }
+        }
+        return;
+      }
+
+      // verb === 'run' — existing flow
+      const taskContent = command.taskDescription ?? message.content;
+
       // 1. Match or create project
-      let project = await this.projectRegistry.matchProject(message.content);
+      let project = command.projectName
+        ? await this.projectRegistry.matchProject(command.projectName)
+        : await this.projectRegistry.matchProject(taskContent);
 
       if (!project) {
-        const domain = AgentExecutor.detectDomain(message.content);
-        const name = this.extractProjectName(message.content) ?? this.generateProjectName(domain);
+        const domain = AgentExecutor.detectDomain(taskContent);
+        const name = command.projectName ?? this.extractProjectName(taskContent) ?? this.generateProjectName(domain);
 
         await message.replyFn(
           `새 프로젝트를 생성합니다: **${name}** (도메인: ${domain})\n잠시 기다려 주세요...`,
@@ -80,7 +139,7 @@ export class ProjectRouter {
         project = await this.creator.create({
           name,
           domain,
-          description: message.content.slice(0, 200),
+          description: taskContent.slice(0, 200),
           baseDir: this.baseDir,
           githubUser: this.githubUser,
         });
@@ -94,8 +153,8 @@ export class ProjectRouter {
       let agentId = this.agentRegistry.getAgentForDomain(project.domain);
 
       // 2a. If domain is 'general' and content is substantial, try BuilderAgent
-      if (project.domain === 'general' && message.content.length > 100) {
-        const novelDomain = extractNovelDomain(message.content);
+      if (project.domain === 'general' && taskContent.length > 100) {
+        const novelDomain = extractNovelDomain(taskContent);
         try {
           const builder = new BuilderAgent(process.cwd(), this.agentRegistry);
           const buildResult = await builder.create({
@@ -132,7 +191,9 @@ export class ProjectRouter {
       // 3. Enqueue — concurrency=1 per project (P1 solution)
       const finalProject = project;
       const finalDomain = project.domain;
-      await this.queue.enqueue(project.id, message, async () => {
+      // Synthetic message with parsed task content so orchestrator receives clean task
+      const taskMessage: ChannelMessage = { ...message, content: taskContent };
+      await this.queue.enqueue(project.id, taskMessage, async () => {
         await message.replyFn(
           `🔄 **${agentId}** 에이전트가 작업을 시작합니다...`,
         );
@@ -140,7 +201,7 @@ export class ProjectRouter {
         const task = {
           id: message.id,
           projectId: finalProject.id,
-          message,
+          message: taskMessage,
           priority: 0,
           enqueuedAt: new Date(),
           status: 'running' as const,
