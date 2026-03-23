@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "type": "module",
   "description": "Open multi-agent orchestration platform",
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "main": "dist/index.js",
   "bin": {
     "openagora": "./bin/openagora.js"

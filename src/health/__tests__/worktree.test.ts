@@ -23,8 +23,8 @@ describe('WorktreeManager', () => {
 
   describe('getPath()', () => {
     it('generates correct worktree path', () => {
-      const result = WorktreeManager.getPath('/home/user/project', 'task-123');
-      expect(result).toBe('/home/user/project/.trees/task-task-123');
+      const result = WorktreeManager.getPath('/tmp/test-project', 'task-123');
+      expect(result).toBe('/tmp/test-project/.trees/task-task-123');
     });
   });
 
@@ -32,13 +32,13 @@ describe('WorktreeManager', () => {
     it('runs git worktree add and returns path', async () => {
       mockExecFile.mockResolvedValue({ stdout: '', stderr: '' });
 
-      const result = await WorktreeManager.create('/home/user/project', 'task-1');
+      const result = await WorktreeManager.create('/tmp/test-project', 'task-1');
 
-      expect(result).toBe('/home/user/project/.trees/task-task-1');
+      expect(result).toBe('/tmp/test-project/.trees/task-task-1');
       expect(mockExecFile).toHaveBeenCalledWith(
         'git',
-        ['worktree', 'add', '--detach', '/home/user/project/.trees/task-task-1', 'HEAD'],
-        { cwd: '/home/user/project' },
+        ['worktree', 'add', '--detach', '/tmp/test-project/.trees/task-task-1', 'HEAD'],
+        { cwd: '/tmp/test-project' },
       );
     });
 
@@ -54,12 +54,12 @@ describe('WorktreeManager', () => {
     it('runs git worktree remove', async () => {
       mockExecFile.mockResolvedValue({ stdout: '', stderr: '' });
 
-      await WorktreeManager.remove('/home/user/project', 'task-1');
+      await WorktreeManager.remove('/tmp/test-project', 'task-1');
 
       expect(mockExecFile).toHaveBeenCalledWith(
         'git',
-        ['worktree', 'remove', '--force', '/home/user/project/.trees/task-task-1'],
-        { cwd: '/home/user/project' },
+        ['worktree', 'remove', '--force', '/tmp/test-project/.trees/task-task-1'],
+        { cwd: '/tmp/test-project' },
       );
     });
 

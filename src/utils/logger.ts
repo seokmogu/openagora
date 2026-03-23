@@ -1,7 +1,9 @@
 import { createLogger, format, transports } from 'winston';
 import path from 'node:path';
+import { ensureDir } from './platform.js';
 
 const LOG_DIR = path.resolve(process.cwd(), 'logs');
+ensureDir(LOG_DIR);
 
 const isProduction = process.env['NODE_ENV'] === 'production';
 

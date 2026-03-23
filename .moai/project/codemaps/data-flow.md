@@ -1,449 +1,638 @@
 # OpenAgora Data Flow
 
-## Overall Message Lifecycle
+## Core Message Lifecycle
+
+### Flow: User Message → Agent Response
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│ CHANNEL ADAPTER (External)                                               │
-│ Slack / Discord / Telegram / Email / Webhook / CLI                      │
-│ → Normalize to ChannelMessage                                            │
-└────────────────────────┬────────────────────────────────────────────────┘
-                         │ ChannelMessage
-                         │ { id, channel, userId, content, replyFn }
-                         │
-┌────────────────────────▼────────────────────────────────────────────────┐
-│ PROJECT ROUTER                                                            │
-│ ├─ matchProject(content) → existing Project?                            │
-│ │  └─ No? → creator.create() → new Project                             │
-│ ├─ detectDomain(content) → DomainType                                   │
-│ ├─ getAgentForDomain(domain) → agentId                                  │
-│ └─ enqueue(projectId, message, executeJob)                              │
-└────────────────────────┬────────────────────────────────────────────────┘
-                         │ Queued Task
-                         │ { id, projectId, message, status: 'pending' }
-                         │
-┌────────────────────────▼────────────────────────────────────────────────┐
-│ PROJECT QUEUE (Per-Project FIFO, Concurrency=1)                         │
-│                                                                          │
-│ ┌──────────────────────────────────────────────────────────────────┐   │
-│ │ Project A:  [Job1]  → Job2 → Job3                               │   │
-│ │ Project B:               [Job4]  → Job5                          │   │
-│ │ Project C:                            [Job6]                     │   │
-│ │           (Currently executing)                                  │   │
-│ └──────────────────────────────────────────────────────────────────┘   │
-│                                                                          │
-│ When job done: dequeue next, or wait                                   │
-└────────────────────────┬────────────────────────────────────────────────┘
-                         │ Execute Job Callback
-                         │ await executeJob()
-                         │
-┌────────────────────────▼────────────────────────────────────────────────┐
-│ AGENT EXECUTOR                                                           │
-│                                                                          │
-│ 1. Check CircuitBreaker for agent                                       │
-│ 2. Build prompt from task.message.content                               │
-│ 3. Create git worktree (ProjectPath/worktrees/{taskId})                 │
-│ 4. Spawn: claude -p --agent {agentId} {prompt}                          │
-│ 5. Timeout: 30 minutes                                                   │
-│ 6. Capture stdout → output                                              │
-│ 7. Record: success/failure                                              │
-│ 8. Update: CircuitBreaker state                                         │
-│ 9. Clean: Remove worktree                                               │
-│                                                                          │
-│ Return: ExecutionResult { success, output, durationMs }                 │
-└────────────────────────┬────────────────────────────────────────────────┘
-                         │ ExecutionResult (primary)
-                         │
-┌────────────────────────▼────────────────────────────────────────────────┐
-│ MULTI-STAGE ORCHESTRATOR                                                │
-│                                                                          │
-│ STAGE 1: PRIMARY (Already Done)                                         │
-│ ├─ result = ExecutionResult from AgentExecutor                          │
-│ └─ if !success: return early (no review/verify)                         │
-│                                                                          │
-│ P2P CHECK:                                                               │
-│ ├─ Parse primary.output for DELEGATE blocks                            │
-│ │  (format: <!-- DELEGATE to expert-X: ...content... -->)              │
-│ └─ if delegations found:                                               │
-│    ├─ P2PRouter.route(delegations)                                     │
-│    └─ Append P2P outputs to primary.output                             │
-│                                                                          │
-│ STAGE 2: REVIEW (Best-Effort, Timeout 5min)                            │
-│ ├─ Prompt: "Review for correctness, completeness"                      │
-│ ├─ Model: Codex (GPT, via CLI)                                         │
-│ ├─ Result: PASS / NEEDS_IMPROVEMENT / FAIL                             │
-│ └─ Status: ok | timeout | error | skipped                              │
-│                                                                          │
-│ STAGE 3: VERIFY (Best-Effort, Timeout 5min)                            │
-│ ├─ Prompt: "Verify for factual accuracy, logic"                        │
-│ ├─ Model: Gemini (via API)                                             │
-│ ├─ Result: VERIFIED / PARTIALLY_VERIFIED / UNVERIFIED                  │
-│ └─ Status: ok | timeout | error | skipped                              │
-│                                                                          │
-│ CONVERGENCE CHECK (RalphLoop):                                          │
-│ ├─ if verify.output == undefined: skip                                 │
-│ ├─ if "VERIFIED" in verify.output (not "UNVERIFIED"): converged! ✓     │
-│ └─ else: enter retry loop                                              │
-│                                                                          │
-│ RETRY LOOP (max 5 iterations):                                          │
-│ ├─ Detect stagnation (same verify output twice): exit                  │
-│ ├─ Append verify feedback to task.message.content                      │
-│ ├─ Re-run primary (AgentExecutor) with feedback                        │
-│ ├─ Re-verify (Stage 3 again)                                           │
-│ ├─ Converged? (VERIFIED): exit loop                                    │
-│ └─ Max iterations? (5): exit loop (convergedReason=max-iterations)    │
-│                                                                          │
-│ Return: MultiStageResult {                                              │
-│   success,                                                               │
-│   primary,                 # ExecutionResult                            │
-│   review,                  # StageResult                                │
-│   verify,                  # StageResult                                │
-│   summary,                 # All outputs combined                       │
-│   convergedReason,         # verified|quality-gates|stagnation|...    │
-│ }                                                                        │
-└────────────────────────┬────────────────────────────────────────────────┘
-                         │ MultiStageResult
-                         │
-┌────────────────────────▼────────────────────────────────────────────────┐
-│ PROJECT ROUTER (Response Phase)                                         │
-│ ├─ result.success?                                                      │
-│ │  ├─ Yes: message.replyFn(formatSuccess(...))                         │
-│ │  └─ No:  message.replyFn(formatError(...))                           │
-│ └─ Notify: health.notifier.send({ title, body, level, ... })           │
-│                                                                          │
-│ CHANNEL ADAPTER (Sends Reply)                                           │
-│ ├─ Slack: bot.client.chat.postMessage()                                │
-│ ├─ Discord: message.reply()                                            │
-│ ├─ Telegram: ctx.reply()                                               │
-│ ├─ Email: nodemailer.sendMail()                                        │
-│ ├─ Webhook: HTTP POST response                                         │
-│ └─ CLI: Print to stdout                                                │
-│                                                                          │
-│ Task Complete ✓                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│ PHASE 1: INPUT & NORMALIZATION                                  │
+└─────────────────────────────────────────────────────────────────┘
+
+1. User sends message in external channel
+   └─ Slack: /run my-project Do something
+   └─ Discord: @agora /run my-project Do something
+   └─ Telegram: /run my-project Do something
+   └─ Email: To: agora@company.com (subject + body)
+   └─ Webhook: POST http://localhost:3000/webhook
+   └─ CLI: Type message to stdin
+
+   ↓ (Adapter-specific handler)
+
+2. Adapter normalizes to ChannelMessage
+   {
+     id: "msg-uuid",
+     channel: "slack" | "discord" | etc.,
+     channelId: "C123456" | "123456789",
+     userId: "U123456",
+     content: "Do something",
+     timestamp: Date.now(),
+     metadata: { slack_thread_ts: "1234.567" },
+     replyFn: async (text) => {
+       // SlackClient.postMessage(channelId, text)
+       // DiscordChannel.send(text)
+       // TelegramChat.sendMessage(text)
+       // etc.
+     }
+   }
+
+   ↓ (AdapterManager routes all to ProjectRouter)
+
+┌─────────────────────────────────────────────────────────────────┐
+│ PHASE 2: ROUTING & PROJECT MANAGEMENT                           │
+└─────────────────────────────────────────────────────────────────┘
+
+3. ProjectRouter.handleMessage(channelMessage)
+   
+   3a. Parse command
+       input: "Do something"
+       └─ Check if message matches /run, /setup, /list, /help
+       └─ Extract: command, projectName, taskDescription
+   
+   3b. Lookup or create project
+       if command === "/run":
+         projectId = derive from (channel + userId)
+         project = ProjectRegistry.getProject(projectId)
+         
+         if project not found:
+           project = ProjectCreator.create(
+             name: projectName,
+             domain: guess from taskDescription,
+             githubRepo: lookup from config
+           )
+           ProjectRegistry.saveProject(project)
+         
+         [Project created event logged]
+   
+   3c. Select agent for task
+       agents = AgentRegistry.listAgents(project.domain)
+       
+       if agents.length === 0:
+         agent = BuilderAgent.create(project.domain)
+         [Dynamic agent creation logged]
+       else:
+         agent = agents[0]  // Primary agent for domain
+   
+   ↓ (ProjectRouter enqueues task)
+
+┌─────────────────────────────────────────────────────────────────┐
+│ PHASE 3: TASK QUEUEING & BUFFERING                              │
+└─────────────────────────────────────────────────────────────────┘
+
+4. ProjectRouter enqueues task to per-project queue
+   
+   ProjectQueue.enqueue(projectId, {
+     id: "task-uuid",
+     projectId: projectId,
+     message: channelMessage,
+     priority: 0,  // FIFO
+     enqueuedAt: Date.now(),
+     status: "pending"
+   })
+   
+   [Task enqueued event logged with queue depth]
+   
+   Project Queue Structure:
+   
+   ProjectQueue {
+     queues: Map<projectId, QueuedTask[]> {
+       "project-1": [task1, task2, task3],
+       "project-2": [task4],
+       "project-3": [task5, task6, task7, task8]
+     }
+   }
+
+   ↓ (Router dequeues tasks from all projects in round-robin)
+
+┌─────────────────────────────────────────────────────────────────┐
+│ PHASE 4: AGENT EXECUTION & SUBPROCESS SPAWNING                  │
+└─────────────────────────────────────────────────────────────────┘
+
+5. ProjectRouter.processQueue() runs on interval (e.g., 100ms)
+   
+   for each project in ProjectQueue:
+     if (project has pending tasks) && (project not running):
+       task = ProjectQueue.dequeue(projectId)
+       task.status = "running"
+       
+       ↓ (Check circuit breaker)
+       
+       breaker = CircuitBreakerRegistry.get(agentId)
+       if breaker.isOpen():
+         task.status = "failed"
+         message.replyFn("Circuit breaker open, try again later")
+         continue
+       
+       [Circuit breaker status: ${breaker.state}]
+       
+       ↓ (Spawn subprocess)
+
+6. AgentExecutor.run(task, agentId, projectPath)
+   
+   6a. Build prompt from context
+       prompt = {
+         task: task.message.content,
+         projectPath: project.path,
+         projectDomain: project.domain,
+         availableAgents: project.agents.map(id => AgentRegistry.get(id))
+       }
+   
+   6b. Spawn subprocess with 30-minute timeout
+       const child = spawn('claude', [
+         '--api-key', process.env.CLAUDE_API_KEY,
+         '--prompt', JSON.stringify(prompt),
+         '--project-path', project.path
+       ])
+       
+       ProcessWatcher.track(child.pid, agentId)
+       timeout_handle = setTimeout(() => {
+         if (child.kill() failed):
+           process.kill(child.pid, 'SIGKILL')
+       }, 30 * 60 * 1000)
+   
+   6c. Capture output
+       output = ''
+       child.stdout.on('data', chunk => output += chunk)
+       child.stderr.on('data', chunk => output += chunk)
+   
+   6d. Wait for completion or timeout
+       await new Promise((resolve, reject) => {
+         child.on('exit', (code) => {
+           clearTimeout(timeout_handle)
+           ProcessWatcher.untrack(child.pid)
+           resolve(code)
+         })
+       })
+   
+   [Agent execution completed: ${agentId}, duration: ${durationMs}ms]
+   
+   ExecutionResult = {
+     taskId: task.id,
+     agentId: agentId,
+     success: (exit code === 0),
+     output: captured_output,
+     durationMs: Date.now() - startMs
+   }
+
+   ↓ (Circuit breaker records result)
+
+7. CircuitBreakerRegistry records result
+   
+   if success:
+     breaker.recordSuccess()
+     breaker.state = "CLOSED"
+   else:
+     breaker.recordFailure()
+     if breaker.failureCount >= 5:
+       breaker.state = "OPEN"
+   
+   [Circuit breaker state change: ${agentId} → ${breaker.state}]
+
+┌─────────────────────────────────────────────────────────────────┐
+│ PHASE 5: MULTI-STAGE ORCHESTRATION & QUALITY GATES              │
+└─────────────────────────────────────────────────────────────────┘
+
+8. MultiStageOrchestrator.executeStages(task, agentId)
+   
+   8a. STAGE 1: PRIMARY (Always executes)
+       result = AgentExecutor.run(task, agentId, projectPath)
+       primary = result
+       
+       if primary.success:
+         proceed to review
+       else:
+         skip to result synthesis
+   
+   8b. STAGE 2: REVIEW (Optional, 5-min timeout)
+       modelRoute = ModelRouter.routeByDomain(project.domain)
+       reviewModel = modelRoute.review
+       
+       if reviewModel not available:
+         review = { status: "skipped" }
+       else:
+         review_result = AgentExecutor.run(
+           task: { ...task, inputToPrevious: primary.output },
+           agentId: reviewModel,
+           timeout: 5 * 60 * 1000
+         )
+         
+         if timed out:
+           review = { status: "timeout" }
+         else:
+           review = { 
+             status: review_result.success ? "ok" : "error",
+             output: review_result.output
+           }
+   
+   8c. STAGE 3: VERIFY (Optional, 5-min timeout)
+       verifyModel = modelRoute.verify
+       
+       if reviewModel not available || primary+review already confirmed:
+         verify = { status: "skipped" }
+       else:
+         verify_result = AgentExecutor.run(
+           task: { ...task, inputToVerify: review.output },
+           agentId: verifyModel,
+           timeout: 5 * 60 * 1000
+         )
+         
+         if timed out:
+           verify = { status: "timeout" }
+         else:
+           verify = { 
+             status: verify_result.success ? "ok" : "error",
+             output: verify_result.output
+           }
+   
+   8d. Stagnation Detection (Ralph Loop)
+       iterations = [primary, review, verify].filter(r => r.success).length
+       
+       if iterations >= 3:
+         convergedReason = "verified"
+         break  // All stages succeeded
+       
+       if RalphLoop.isStagnant():
+         convergedReason = "stagnation"
+         break  // No progress detected
+       
+       if qualityMetrics.pass:
+         convergedReason = "quality-gates"
+         break  // Quality threshold met
+
+┌─────────────────────────────────────────────────────────────────┐
+│ PHASE 6: RESULT SYNTHESIS & OUTPUT                              │
+└─────────────────────────────────────────────────────────────────┘
+
+9. MultiStageOrchestrator synthesizes final result
+   
+   summary = synthesize(
+     primary.output,
+     review?.output,
+     verify?.output,
+     convergedReason
+   )
+   
+   multiStageResult = {
+     taskId: task.id,
+     agentId: agentId,
+     success: primary.success && !review.error && !verify.error,
+     primary: primary,
+     review: review,
+     verify: verify,
+     summary: summary,
+     durationMs: elapsed,
+     iterations: iteration_count,
+     convergedReason: convergedReason
+   }
+   
+   [Multi-stage orchestration completed: ${iterations} iterations, ${convergedReason}]
+
+   ↓ (Update task status)
+
+10. Update task status in registry
+    
+    task.status = multiStageResult.success ? "completed" : "failed"
+    task.result = multiStageResult
+    ProjectRegistry.updateTask(task)
+    
+    [Task completed: ${task.id}, success: ${task.status}]
+
+┌─────────────────────────────────────────────────────────────────┐
+│ PHASE 7: REPLY TO USER (Back to original channel)               │
+└─────────────────────────────────────────────────────────────────┘
+
+11. Send result back to user
+    
+    replyText = format_for_channel(multiStageResult.summary)
+    
+    await channelMessage.replyFn(replyText)
+    
+    // SlackAdapter: message.client.chat.postMessage()
+    // DiscordAdapter: interaction.editReply()
+    // TelegramAdapter: context.reply()
+    // etc.
+    
+    [Reply sent to user via ${channel}]
 ```
 
----
+## Error Propagation
 
-## Request Processing State Machine
-
-```
-Message Received
-  │
-  ├─ [INGESTION]
-  │  ├─ Channel adapter normalizes → ChannelMessage
-  │  └─ Pass to router.handleMessage()
-  │
-  ├─ [DISPATCH]
-  │  ├─ Match project (registry lookup)
-  │  ├─ If no match: create new project (git repo + registry entry)
-  │  ├─ Detect domain (content regex matching)
-  │  ├─ Get agent for domain (registry mapping)
-  │  └─ Enqueue to project queue
-  │
-  ├─ [QUEUED]
-  │  ├─ Wait for queue to be empty (concurrency=1 per project)
-  │  └─ Meanwhile: other projects execute in parallel
-  │
-  ├─ [EXECUTION] ─── Primary Agent (claude)
-  │  ├─ Check circuit breaker
-  │  ├─ Create worktree (git isolation)
-  │  ├─ Spawn subprocess: claude --agent {agentId}
-  │  ├─ Stream output (30min timeout)
-  │  ├─ Capture result
-  │  └─ Update circuit breaker
-  │
-  ├─ [P2P_ROUTING] (if DELEGATE blocks found)
-  │  ├─ Parse delegations from primary.output
-  │  └─ Route to other agents (P2P network)
-  │
-  ├─ [REVIEW] ──── Secondary Model (codex, best-effort)
-  │  ├─ Timeout: 5 minutes
-  │  ├─ Prompt: assess correctness/completeness
-  │  └─ Result: PASS / NEEDS_IMPROVEMENT / FAIL
-  │
-  ├─ [VERIFY] ──── Tertiary Model (gemini, best-effort)
-  │  ├─ Timeout: 5 minutes
-  │  ├─ Prompt: verify factual accuracy
-  │  └─ Result: VERIFIED / PARTIALLY_VERIFIED / UNVERIFIED
-  │
-  ├─ [CONVERGENCE] ─── RalphLoop Decision
-  │  ├─ VERIFIED? → CONVERGED ✓
-  │  ├─ Stagnation (same output)? → CONVERGED (gave up)
-  │  ├─ Max iterations (5)? → CONVERGED (timeout)
-  │  └─ Feedback available? → RETRY (loop back to EXECUTION)
-  │
-  └─ [RESPONSE]
-     ├─ Format result (add emojis, markdown)
-     ├─ Send via message.replyFn() to channel
-     ├─ Send notification to health daemon
-     └─ Task Complete ✓
-```
-
----
-
-## Data Flow Diagram: Queue & Concurrency
+### Error at Each Phase
 
 ```
-Time →
+PHASE 1: INPUT NORMALIZATION
+├─ Adapter fails to connect → Log warning, skip adapter
+├─ Message format invalid → Log error, reply to user
+└─ replyFn not callable → Log warning, no response
 
-PROJECT A             PROJECT B             PROJECT C
-┌──────────┐          ┌──────────┐          ┌──────────┐
-│ Job A.1  │          │ Job B.1  │          │ Job C.1  │
-│EXECUTING │          │ QUEUED   │          │ QUEUED   │
-│(2min)    │          │          │          │          │
-└──────────┘          └──────────┘          └──────────┘
-     │
-(1min)
-     │
-     ├─ Job A.1 completes
-     │
-     ├─ Job A.2 starts EXECUTING
-     │  (at same time B.1 and C.1 can start if available)
-     │
-┌────▼────────────────────────────────────────────────────┐
-│          PARALLEL EXECUTION (Different Projects)        │
-│                                                          │
-│ Project A: Job A.2 EXECUTING           (0-3min)        │
-│ Project B: Job B.1 EXECUTING           (0-2min)        │
-│ Project C: Job C.1 EXECUTING           (0-1min)        │
-│                                                          │
-│ All three projects work concurrently                    │
-│ No blocking between projects                            │
-│ But within A: A.3 waits for A.2 to finish              │
-└────────────────────────────────────────────────────────┘
+PHASE 2: ROUTING
+├─ Project creation fails → Log error, reply to user
+├─ Agent not found → Create builder agent, continue
+└─ Invalid domain → Default to "general" domain
+
+PHASE 3: QUEUEING
+├─ Queue full → Reject with backpressure message
+├─ Invalid task → Skip and log
+└─ (Queue rarely fails if project exists)
+
+PHASE 4: EXECUTION
+├─ Circuit breaker open → Reply "try again later", no execution
+├─ Subprocess spawn fails → Log error, mark task failed
+├─ Timeout (30 min) → ProcessWatcher SIGKILL, mark failed
+└─ Output capture fails → Log warning, empty output
+
+PHASE 5: ORCHESTRATION
+├─ Review stage timeout → Skip, use primary result
+├─ Verify stage failure → Log warning, use primary+review
+├─ Ralph Loop detects stagnation → Stop, return best result
+└─ All stages fail → Return error summary
+
+PHASE 6: SYNTHESIS
+├─ Summary generation fails → Use raw primary output
+└─ Task update fails → Log warning, continue
+
+PHASE 7: REPLY
+├─ Channel disconnected → Queue reply for later
+├─ replyFn throws → Log error, cannot recover
+└─ Rate limited by channel → Retry with backoff
 ```
 
-**Key Property**: FIFO per project, parallel across projects.
+## Health Check Flow
 
----
-
-## State Transitions: Task Lifecycle
+### Background Health Monitoring (10-minute interval)
 
 ```
-┌──────────────┐
-│ PENDING      │ (Queued, waiting for executor)
-└──────┬───────┘
-       │ Dequeued
-       ▼
-┌──────────────┐
-│ RUNNING      │ (Primary stage executing)
-└──────┬───────┘
-       │ Primary complete
-       ▼
-┌──────────────┐
-│ REVIEW       │ (Secondary stage, optional, best-effort)
-└──────┬───────┘
-       │ Review timeout or error
-       ▼
-┌──────────────┐
-│ VERIFY       │ (Tertiary stage, optional, best-effort)
-└──────┬───────┘
-       │ Verify complete
-       ▼
-┌──────────────┐
-│ CONVERGE     │ (RalphLoop decision)
-│ CHECKING     │
-└──────┬───────┘
-       │ Converged (verified or stagnated)
-       ▼
-┌──────────────┐
-│ COMPLETED    │ (Success or failure, reply sent)
-│              │
-│ Success: primary.success &&                │
-│          (verify skipped OR verify PASS)   │
-│                                             │
-│ Failure: primary failed OR                 │
-│          (verify failed AND max retries)   │
-└──────────────┘
+HealthDaemon.start()
+  ↓ (every 10 minutes)
+  
+1. HealthMonitor.gatherMetrics()
+   - activeProjects = ProjectRegistry.listProjects().length
+   - queueDepth = ProjectQueue.allQueues().reduce(q => q.size).sum
+   - circuitBreakers = CircuitBreakerRegistry.getAll()
+   - uptime = Date.now() - startTime
+   - lastCheck = Date.now()
+
+2. ProcessWatcher.checkProcesses()
+   for each tracked process:
+     - Check if process still alive (ps -p)
+     - If dead > 30 min ago: mark failed
+     - If running > 30 min: SIGKILL force
+   
+   [Process watch: ${alive}/${total} running]
+
+3. TaskDiscovery.findOrphans()
+   for each project in registry:
+     for each task in task history:
+       if (status === "running") && (lastUpdate > 1 hour ago):
+         discoverCallback(task)
+         └─ ProjectRouter.handleDiscoveredTask(task)
+            └─ Resume task from checkpoint
+   
+   [Task discovery: ${found}/${checked} orphaned tasks]
+
+4. RalphLoop.checkStagnation()
+   if (queueDepth > threshold && no progress > 30 min):
+     logger.warn('System stagnation detected')
+     Notifier.alert('OpenAgora stagnation')
+
+5. HealthStatus response includes:
+   {
+     healthy: (no circuit breakers open && queue reasonable),
+     uptime: elapsed_seconds,
+     activeProjects: count,
+     queueDepth: total_pending,
+     circuitBreakers: { agent-id: state },
+     lastCheck: timestamp
+   }
+
+   [Health check complete: healthy=${status.healthy}]
 ```
 
----
+## Data Structures in Motion
 
-## Queue Data Structure
+### ChannelMessage (Input)
 
-**Per-Project Queue**:
 ```typescript
-class ProjectQueue {
-  private queues: Map<projectId, PQueue>
+{
+  id: "msg-550e8400-e29b-41d4-a716-446655440000",
+  channel: "slack",
+  channelId: "C123ABC",
+  userId: "U456DEF",
+  content: "/run myproject Implement user authentication",
+  timestamp: 2026-03-23T10:30:00Z,
+  metadata: {
+    slack_thread_ts: "1234.567890",
+    slack_team_id: "T789GHI"
+  },
+  replyFn: [AsyncFunction: handler for this channel]
+}
+```
 
-  async enqueue(projectId: string, message: ChannelMessage, job: () => Promise<void>) {
-    // Get or create queue for projectId
-    let q = this.queues.get(projectId)
-    if (!q) {
-      q = new PQueue({ concurrency: 1 })  // FIFO, one at a time
-      this.queues.set(projectId, q)
-    }
+### QueuedTask (Buffering)
 
-    // Add to queue (will wait if others executing)
-    await q.add(() => job())
+```typescript
+{
+  id: "task-550e8400-e29b-41d4-a716-446655440001",
+  projectId: "proj-slack-U456DEF",
+  message: [ChannelMessage from above],
+  priority: 0,
+  enqueuedAt: 2026-03-23T10:30:05Z,
+  status: "running",
+  result?: {
+    taskId: "task-...",
+    agentId: "agent-default",
+    success: true,
+    primary: { output: "...", durationMs: 45000 },
+    review: { status: "ok", output: "..." },
+    verify: { status: "skipped" },
+    summary: "Implementation complete",
+    durationMs: 55000,
+    iterations: 2,
+    convergedReason: "verified"
   }
 }
 ```
 
-**Behavior**:
-- New project → new queue
-- Message arrives → add to queue
-- If queue empty → execute immediately
-- If queue busy → wait in queue (FIFO)
+### MultiStageResult (Output)
 
----
-
-## Worktree Isolation Data Flow
-
-```
-Task Execution
-  │
-  ├─ WorktreeManager.create(projectPath, taskId)
-  │  ├─ git worktree add ../.claude/worktrees/{taskId}
-  │  └─ Return worktreePath
-  │
-  ├─ Spawn claude CLI in worktreePath
-  │  ├─ cwd = worktreePath (or projectPath if worktree fails)
-  │  └─ All file changes isolated to worktree
-  │
-  ├─ Agent executes in isolation
-  │  ├─ Create files → worktree
-  │  ├─ Commit changes → worktree branch
-  │  ├─ No effect on main branch
-  │  └─ No conflict with other tasks
-  │
-  └─ WorktreeManager.remove(projectPath, taskId)
-     ├─ git worktree remove ../.claude/worktrees/{taskId}
-     └─ Branch and files deleted (cleanup)
-```
-
-**Key**: Each task is completely isolated. Parallel tasks never interfere.
-
----
-
-## Health Monitoring Data Flow
-
-```
-Every 10 minutes:
-  │
-  ├─ HealthMonitor.check()
-  │  ├─ Get router.getActiveProjects() → [projectIds]
-  │  ├─ Get router.getQueueStats() → queue depth per project
-  │  ├─ Get CircuitBreakerRegistry.getStates() → agent health
-  │  └─ Compute HealthStatus (uptime, healthy flag)
-  │
-  ├─ TaskDiscovery.check()
-  │  ├─ Scan all project directories
-  │  ├─ Look for .task or incomplete-* markers
-  │  ├─ If found: infer task content
-  │  └─ Re-enqueue: router.handleDiscoveredTask(syntheticMessage)
-  │
-  ├─ ProcessWatcher.check()
-  │  ├─ Get list of tracked processes
-  │  ├─ Check elapsed time (task timeout = 30min)
-  │  └─ If timeout exceeded: process.kill(-pid, 'SIGKILL')
-  │
-  └─ HTTP Endpoint GET /health
-     ├─ Return latest HealthStatus JSON
-     └─ Used by load balancers / monitoring systems
+```typescript
+{
+  taskId: "task-...",
+  agentId: "agent-default",
+  success: true,
+  primary: {
+    taskId: "task-...",
+    agentId: "agent-default",
+    success: true,
+    output: "[Claude agent output]\n[Multiple lines of execution trace]",
+    durationMs: 45000
+  },
+  review: {
+    status: "ok",
+    model: "gpt-4-turbo",
+    output: "[Review feedback]",
+    error: null
+  },
+  verify: {
+    status: "skipped",
+    model: "gemini-pro"
+  },
+  summary: "User authentication implementation reviewed and verified",
+  durationMs: 55000,
+  iterations: 2,
+  convergedReason: "verified"
+}
 ```
 
----
+## Performance Characteristics
 
-## P2P Agent Delegation Data Flow
+### Latency (p50/p95/p99)
 
-**If primary output contains DELEGATE blocks**:
+| Phase | Operation | p50 | p95 | p99 |
+|-------|-----------|-----|-----|-----|
+| 1 | Adapter normalization | 5ms | 20ms | 100ms |
+| 2 | Routing & project lookup | 10ms | 30ms | 50ms |
+| 3 | Task queueing | 2ms | 5ms | 10ms |
+| 4 | Agent execution | 30s | 45s | 60s |
+| 5 | Multi-stage orchestration | 35s | 50s | 65s |
+| 7 | Reply via channel | 100ms | 500ms | 2s |
+| **Total** | End-to-end | 35s | 50s | 65s |
 
-```
-Primary Agent Output:
-  │
-  ├─ <!-- DELEGATE to expert-researcher: "Find market trends for X" -->
-  ├─ <!-- DELEGATE to expert-designer: "Create UI mockup" -->
-  │
-  └─ Other output...
-     │
-     └─ P2PRouter.parse(output)
-        ├─ Extract all DELEGATE blocks
-        └─ Return Delegation[] array
-           │
-           └─ P2PRouter.route(delegations)
-              ├─ For each delegation:
-              │  ├─ Extract target agent (expert-researcher)
-              │  ├─ Extract content ("Find market trends...")
-              │  ├─ Spawn that agent (like primary)
-              │  └─ Capture result
-              │
-              └─ Append all P2P results to primary.output
-                 └─ Pass combined output to review/verify stages
-```
+### Throughput
 
-**Effect**: One primary agent can delegate to many specialists, all results combined.
+- **Input rate**: 100+ messages/sec (adapter limited)
+- **Queue depth**: 1000+ tasks (memory permitting)
+- **Concurrent executions**: 10+ agents (CPU bound)
+- **Reply latency**: <500ms (network bound)
 
----
+## Special Cases
 
-## Circuit Breaker State Machine
+### Case: Project Not Found → Auto-Create
 
 ```
-CLOSED (Normal) ────────────────────┐
-  │                                 │
-  ├─ Success? → Stay CLOSED         │
-  └─ Failure? → count++             │
-     └─ count >= 5? → OPEN ↓        │
-                                    │
-OPEN (Circuit Open) ◄──────────────┘
-  │ (New requests rejected)
-  │
-  ├─ Reject task: "Circuit breaker OPEN"
-  └─ Wait for recovery signal
-     └─ Timeout-based: try again after interval
-        └─ 1 Success? → HALF_OPEN → CLOSED
+User: "/run new-project Do something"
+  ↓
+CommandParser extracts: projectName="new-project"
+  ↓
+ProjectRouter.handleMessage()
+  ↓
+if project not in ProjectRegistry:
+  ProjectCreator.create(
+    name: "new-project",
+    path: "${CWD}/projects/new-project",
+    domain: guessFromContent("Do something") → "general",
+    githubRepo: null
+  )
+  ↓
+  ProjectRegistry.saveProject(project)
+  ↓
+  [New project created: new-project]
+  ↓
+Continue to agent selection
 ```
 
-**Effect**: Failing agents are deprioritized; system tries alternative agents.
-
----
-
-## RalphLoop Convergence Detection
+### Case: Agent Circuit Breaker Open
 
 ```
-Verify Output Received
-  │
-  ├─ if output contains "VERIFIED" (not "UNVERIFIED")
-  │  └─ → Converged ✓ (verified)
-  │
-  ├─ else if (previousOutput == currentOutput)
-  │  └─ → Converged ✓ (stagnation)
-  │
-  ├─ else if iterations >= maxIterations (5)
-  │  └─ → Converged ✓ (timeout)
-  │
-  └─ else
-     └─ Append feedback to task
-        └─ Re-run primary with feedback
-           └─ Re-verify
-              └─ (Loop back to top)
+AgentExecutor.run(task, agentId, projectPath)
+  ↓
+breaker = CircuitBreakerRegistry.get(agentId)
+  ↓
+if breaker.isOpen():
+  ↓
+  return {
+    taskId: task.id,
+    agentId: agentId,
+    success: false,
+    output: "Circuit breaker OPEN. Agent temporarily unavailable.",
+    durationMs: 1
+  }
+  ↓
+  [Circuit rejection: ${agentId}]
+  ↓
+  task.status = "failed"
+  ↓
+  replyFn("Agent ${agentId} is experiencing issues. Please try again in 5 minutes.")
 ```
 
-**Key**: Prevents infinite loops while allowing useful feedback iterations.
+### Case: Multi-Stage Convergence (All Stages Pass)
 
----
+```
+Primary stage: SUCCESS
+  ↓
+Review stage: SUCCESS (confirms primary)
+  ↓
+Ralph Loop: No stagnation detected
+  ↓
+Verify stage: SUCCESS (confirms review)
+  ↓
+convergedReason = "verified"
+  ↓
+STOP - Return synthesized result with all three stage outputs
+```
 
-## State Persistence
+### Case: Multi-Stage Divergence (Ralph Loop Detects Stagnation)
 
-**In-Memory**:
-- Active queues
-- Circuit breaker states
-- Process tracking
-- Health monitor readings
+```
+Primary stage: SUCCESS
+  ↓
+Review stage: DIFFERENT (contradicts primary)
+  ↓
+Ralph Loop: detects loop back to primary output
+  ↓
+Iteration limit or timeout exceeded
+  ↓
+convergedReason = "stagnation"
+  ↓
+STOP - Return primary result with warning
+  ↓
+replyFn("Generated result with review disagreement (see details)")
+```
 
-**Persistent (Disk)**:
-- Project registry (`registry/projects.json`)
-- Agent registry (`registry/agents.json`)
-- Project git repos (full history)
-- Dynamic agents (`.claude/agents/moai/*.md`)
+## Message Flow Diagram (ASCII)
 
-**Lost on Restart**:
-- Queued but not-executing tasks
-- In-progress agent executions (killed)
-- Circuit breaker counters (reset to 0)
-
----
-
-**Version**: 0.1.0
-**Last Updated**: 2026-03-21
+```
+[User in Slack]
+      ↓
+[SlackAdapter.onMessage]
+      ↓
+[ChannelMessage: { channel: "slack", content: "/run...", replyFn }]
+      ↓
+[ProjectRouter.handleMessage]
+      ↓
+[ProjectRegistry.getOrCreate("proj-slack-userId")]
+      ↓
+[AgentRegistry.findAgent(domain)]
+      ↓
+[ProjectQueue.enqueue(projectId, task)]
+      ↓
+[ProcessQueue interval timer triggers]
+      ↓
+[ProjectQueue.dequeue(projectId)]
+      ↓
+[AgentExecutor.run(task, agentId, projectPath)]
+      ↓
+[spawn('claude', [prompts, args])]
+      ↓
+[ProcessWatcher.track(pid)]
+      ↓
+[Wait 30 minutes or until exit]
+      ↓
+[CircuitBreaker.recordSuccess/Failure]
+      ↓
+[MultiStageOrchestrator.executeStages]
+      ├─ STAGE 1: Primary
+      ├─ STAGE 2: Review (if primary success)
+      ├─ STAGE 3: Verify (if review success)
+      └─ Ralph Loop: Stagnation check
+      ↓
+[MultiStageResult synthesized]
+      ↓
+[Task marked completed/failed]
+      ↓
+[channelMessage.replyFn(summary)]
+      ↓
+[SlackClient.chat.postMessage]
+      ↓
+[User sees reply in Slack]
+```

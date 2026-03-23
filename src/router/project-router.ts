@@ -1,5 +1,6 @@
 import { join } from 'node:path';
 import type { AppConfig } from '../config/loader.js';
+import { defaultBaseDir } from '../utils/platform.js';
 import type { ChannelMessage } from '../types/index.js';
 import { logger } from '../utils/logger.js';
 import { ProjectRegistry } from './registry.js';
@@ -50,7 +51,7 @@ export class ProjectRouter {
     );
 
     this.commandParser = new CommandParser();
-    this.baseDir = process.env['BASE_PROJECT_DIR'] ?? '/home/hackit/project';
+    this.baseDir = process.env['BASE_PROJECT_DIR'] ?? defaultBaseDir();
     this.githubUser = process.env['GITHUB_USER'] ?? 'unknown';
   }
 

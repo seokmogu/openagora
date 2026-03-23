@@ -1,299 +1,299 @@
-# OpenAgora Dependency Graph & Analysis
+# OpenAgora Dependencies
+
+## Runtime Dependencies (13 packages)
+
+### Channel Communication (5 packages)
+
+| Package | Version | Purpose | Usage |
+|---------|---------|---------|-------|
+| `@slack/bolt` | ^3.22.0 | Slack Bot API | SlackAdapter integration |
+| `discord.js` | ^14.16.0 | Discord Bot API | DiscordAdapter integration |
+| `telegraf` | ^4.16.0 | Telegram Bot API | TelegramAdapter integration |
+| `nodemailer` | ^8.0.3 | Email sending (SMTP) | EmailAdapter outbound |
+| `imapflow` | ^1.2.16 | Email polling (IMAP) | EmailAdapter inbound |
+
+### HTTP & Web (2 packages)
+
+| Package | Version | Purpose | Usage |
+|---------|---------|---------|-------|
+| `express` | ^4.21.0 | HTTP server framework | WebhookAdapter, health endpoint |
+| `@types/express` | ^4.17.0 | TypeScript types | Express type safety |
+
+### Data & Configuration (4 packages)
+
+| Package | Version | Purpose | Usage |
+|---------|---------|---------|-------|
+| `yaml` | ^2.6.0 | YAML parsing/serialization | config.yaml parsing |
+| `zod` | ^3.24.0 | Runtime schema validation | Config validation |
+| `dotenv` | ^16.4.0 | Environment variable loading | .env file support |
+| `simple-git` | ^3.27.0 | Git CLI wrapper | Worktree management |
+
+### Utilities (2 packages)
+
+| Package | Version | Purpose | Usage |
+|---------|---------|---------|-------|
+| `winston` | ^3.17.0 | Structured logging | Application logging |
+| `p-queue` | ^8.0.0 | Promise queue | Task prioritization |
+
+## Development Dependencies (8 packages)
+
+### TypeScript & Compilation (3 packages)
+
+| Package | Version | Purpose |
+|---------|---------|---------|
+| `typescript` | ^5.7.0 | Language compiler |
+| `tsx` | ^4.19.0 | TypeScript executor for Node.js |
+| `@types/node` | ^20.17.0 | Node.js type definitions |
+
+### Linting & Formatting (3 packages)
+
+| Package | Version | Purpose |
+|---------|---------|---------|
+| `eslint` | ^8.57.0 | Linting |
+| `@typescript-eslint/eslint-plugin` | ^6.21.0 | TypeScript ESLint rules |
+| `@typescript-eslint/parser` | ^6.21.0 | TypeScript ESLint parser |
+
+### Testing (2 packages)
+
+| Package | Version | Purpose |
+|---------|---------|---------|
+| `vitest` | ^4.1.0 | Unit testing framework |
+| `@vitest/coverage-v8` | ^4.1.0 | Code coverage reporting |
+
+### Email Types (1 package)
+
+| Package | Version | Purpose |
+|---------|---------|---------|
+| `@types/nodemailer` | ^7.0.11 | Nodemailer TypeScript types |
 
 ## Internal Module Dependency Graph
 
-```
-                          index.ts
-                             │
-            ┌────────────────┼────────────────┐
-            │                │                │
-    ┌───────▼────────┐  ┌────▼────────┐  ┌──▼─────────────┐
-    │ config/loader  │  │ health/     │  │ adapters/      │
-    │                │  │ daemon      │  │ manager        │
-    └────────────────┘  │             │  │                │
-                        │ ─starts─→   │  └──┬────────────┬┘
-                        └────────┬────┘     │            │
-                                 │      ┌──▼──┐      ┌──▼──┐
-                    ┌────────────┼──→   │slack│      │ cli │
-                    │            │      └─────┘      └─────┘
-              ┌─────▼──────────────┐
-              │ router/            │
-              │ project-router     │
-              │                    │
-              │ ─matches→ registry │
-              │ ─creates→ project  │
-              │ ─detects→ domain   │
-              │ ─selects→ agent    │
-              │ ─enqueues→ task    │
-              └─────┬──────────────┘
-                    │
-        ┌───────────┼─────────────────┐
-        │           │                 │
-    ┌───▼───┐  ┌────▼─────┐  ┌───────▼─────┐
-    │queue/ │  │agents/    │  │models/      │
-    │       │  │executor   │  │multi-stage  │
-    └───────┘  └──┬────────┘  └──┬──────────┘
-                  │              │
-                  │         ┌────▼────┐
-                  │         │review   │
-                  │         │(codex)  │
-                  │         └─────────┘
-                  │
-             ┌────▼────────┐
-             │claude CLI   │
-             │subprocess   │
-             └─────────────┘
+### Layer 1: Foundation (No dependencies within project)
 
-                health/
-                daemon
-                  │
-        ┌─────────┼──────────┐
-        │         │          │
-    process-   task-      circuit-
-    watcher   discovery   breaker
-        │
-        │ (kills zombies)
-        │
-    spawned
-    processes
+```
+types/                      (no internal deps)
+  ↓ (provides types to all)
+utils/logger.ts            (no internal deps except types)
+config/loader.ts           (depends on types, dotenv, yaml, zod)
 ```
 
-## External Package Dependencies
+### Layer 2: Channel Adapters (Foundation + RouterMessage callback)
 
-### Communication Channels (6 adapters)
+```
+adapters/
+  ├── base.ts              (types, utils/logger)
+  ├── slack.ts             (@slack/bolt, types, utils/logger)
+  ├── discord.ts           (discord.js, types, utils/logger)
+  ├── telegram.ts          (telegraf, types, utils/logger)
+  ├── email.ts             (nodemailer, imapflow, types, utils/logger)
+  ├── webhook.ts           (express, types, utils/logger)
+  ├── cli.ts               (types, utils/logger)
+  └── manager.ts           (all above + config, types, utils/logger)
+```
 
-| Package | Version | Purpose | Usage |
-|---------|---------|---------|-------|
-| `@slack/bolt` | ^3.22.0 | Slack integration | Receive messages, send replies |
-| `discord.js` | ^14.16.0 | Discord integration | Bot events, message handling |
-| `telegraf` | ^4.16.0 | Telegram integration | Bot commands, message routing |
-| `imapflow` | ^1.2.16 | Email ingestion | IMAP client, email polling |
-| `nodemailer` | ^8.0.3 | Email sending | SMTP for replies |
-| `@types/nodemailer` | ^7.0.11 | Type defs | TypeScript support |
-| `express` | ^4.21.0 | HTTP server | Webhook endpoint, health check |
+### Layer 3: Infrastructure (Types + Utils)
 
-**Total**: 7 packages, 1 type definition
+```
+queue/
+  └── project-queue.ts     (types, utils/logger)
 
----
+health/
+  ├── circuit-breaker.ts   (types, utils/logger)
+  ├── process-watcher.ts   (types, utils/logger, simple-git)
+  ├── worktree.ts          (types, utils/logger, simple-git)
+  ├── health-monitor.ts    (types, utils/logger)
+  ├── ralph-loop.ts        (types, utils/logger)
+  ├── notifier.ts          (types, utils/logger)
+  ├── task-discovery.ts    (types, utils/logger)
+  └── daemon.ts            (all health/* above, config, express, types, utils/logger)
+```
 
-### Task Management
+### Layer 4: Agent Execution (Infrastructure + Types)
 
-| Package | Version | Purpose | Usage |
-|---------|---------|---------|-------|
-| `p-queue` | ^8.0.0 | Queue management | Per-project FIFO queues |
+```
+agents/
+  ├── registry.ts          (types, utils/logger, simple-git)
+  ├── executor.ts          (types, utils/logger, health/circuit-breaker, health/process-watcher, health/worktree)
+  ├── p2p-router.ts        (types, utils/logger, agents/executor, agents/registry)
+  └── builder-agent.ts     (types, utils/logger)
+```
 
-**Total**: 1 package
+### Layer 5: Model Orchestration (Agent Execution)
 
----
+```
+models/
+  ├── router.ts            (types, utils/logger)
+  └── multi-stage.ts       (types, utils/logger, agents/executor, health/ralph-loop, agents/p2p-router, models/router)
+```
 
-### Version Control & Project Management
+### Layer 6: Routing & Dispatch (All layers)
 
-| Package | Version | Purpose | Usage |
-|---------|---------|---------|-------|
-| `simple-git` | ^3.27.0 | Git wrapper | Create repos, commit, branch |
+```
+router/
+  ├── registry.ts          (types, utils/logger)
+  ├── command-parser.ts    (types, utils/logger)
+  ├── project-creator.ts   (types, utils/logger, router/registry)
+  └── project-router.ts    (types, utils/logger, all of: queue, agents, models, health, router/*, config)
+```
 
-**Total**: 1 package
+### Layer 7: Entry Points (Top-level integration)
 
----
+```
+index.ts                   (config, adapters/manager, router/project-router, health/daemon, utils/logger)
 
-### Configuration & Validation
-
-| Package | Version | Purpose | Usage |
-|---------|---------|---------|-------|
-| `yaml` | ^2.6.0 | YAML parsing | Load config files |
-| `zod` | ^3.24.0 | Runtime validation | Validate config schema |
-| `dotenv` | ^16.4.0 | Environment loading | Load .env files |
-
-**Total**: 3 packages
-
----
-
-### Logging
-
-| Package | Version | Purpose | Usage |
-|---------|---------|---------|-------|
-| `winston` | ^3.17.0 | Structured logging | All debug, info, warn, error logs |
-
-**Total**: 1 package
-
----
-
-### Type Definitions
-
-| Package | Version | Purpose | Usage |
-|---------|---------|---------|-------|
-| `@types/node` | ^20.17.0 | Node.js types | Standard library |
-| `@types/express` | ^4.17.0 | Express types | HTTP framework |
-
-**Total**: 2 packages
-
----
-
-### Runtime
-
-- **Node.js**: 20+ LTS (from package.json @types/node ^20.17.0)
-- **Module System**: ESM (package.json "type": "module")
-
-**Total Dependency Count**: 18 packages (16 npm + 2 type defs)
-
----
-
-## Module-to-Package Mapping
-
-| Module | External Dependencies |
-|--------|----------------------|
-| `adapters/slack.ts` | @slack/bolt, express, types |
-| `adapters/discord.ts` | discord.js |
-| `adapters/telegram.ts` | telegraf |
-| `adapters/email.ts` | imapflow, nodemailer, @types/nodemailer |
-| `adapters/webhook.ts` | express |
-| `agents/executor.ts` | child_process (Node.js builtin) |
-| `config/loader.ts` | yaml, zod, dotenv |
-| `health/daemon.ts` | http (Node.js builtin), express |
-| `models/multi-stage.ts` | none (internal only) |
-| `queue/project-queue.ts` | p-queue |
-| `router/project-router.ts` | path (Node.js builtin) |
-| `router/registry.ts` | fs (Node.js builtin) |
-| `router/project-creator.ts` | simple-git, path (Node.js builtin) |
-| `utils/logger.ts` | winston |
-
----
+cli/
+  ├── main.ts              (config, router/project-router, utils/logger)
+  ├── setup.ts             (types, utils/logger, config)
+  ├── tokens.ts            (types, utils/logger)
+  └── env-manager.ts       (dotenv, types, utils/logger)
+```
 
 ## Circular Dependency Analysis
 
-**Result**: NO CIRCULAR DEPENDENCIES DETECTED
+**No circular dependencies detected** (verified by import tree acyclicity).
 
-**Dependency Direction**:
-```
-config
-  ↓
-health, adapters ←─┐
-  ↓                │
-router ────────────┤
-  ↓                │
-queue, agents ─────┤
-  ↓                │
-models ────────────┘
-  ↓
-(output)
-```
+Key safeguards:
+- `HealthDaemon` owns `ProcessWatcher` (one-way dependency)
+- `ProjectRouter` imports from all layers but nothing imports `ProjectRouter` except index.ts and CLI
+- `AgentExecutor` depends on health but health doesn't depend on agents
+- Types are centralized in `types/index.ts` and never import from modules
 
-**Call Chain**:
-1. index.ts initializes config
-2. health/daemon starts (owns ProcessWatcher)
-3. router initialized with ProcessWatcher reference
-4. Adapters feed into router
-5. Router enqueues to queue
-6. Queue executes agents
-7. Agents report to models
-8. Models use health callbacks (teammateIdle gate)
+## Version Constraints
 
-**Safety**: Circular calls prevented by:
-- Health daemon doesn't call router (uses callback injection)
-- Router doesn't call health during message handling
-- Agents don't call router (isolated subprocess)
+### Production Stability
 
----
+- **TypeScript 5.7+**: Strict mode enabled, ESM support required
+- **Node.js 22 LTS**: ESM modules mandatory (no CommonJS)
+- **Package versions locked**: No minor version ranges (e.g., `^5.7.0` becomes `5.7.x`)
 
-## Dependency Risk Assessment
+### Development Tooling
 
-### Low Risk
-- **winston** (logging): No behavioral dependency; safe to upgrade
-- **zod** (validation): Lightweight, no side effects
-- **dotenv** (env): Single load at startup
-- **express** (HTTP): Isolated to adapters and health server
-- **simple-git** (VCS): Calls external git binary (safe isolation)
+- **Vitest 4.1+**: Modern unit testing
+- **ESLint 8.57+**: Latest linting with TypeScript support
+- **tsx 4.19+**: Fast TypeScript execution for development
 
-### Medium Risk
-- **p-queue**: Core to concurrency model; breaking changes could break P1 fix
-- **yaml**: Config parsing; breaking schema could break startup
-- **@slack/bolt, discord.js, telegraf**: Adapter interfaces could change
-- **imapflow, nodemailer**: Email adapters; less critical than Slack/Discord
+## Installation & Build
 
-### High Risk
-- **node.js child_process** (builtin): Core to agent execution; subprocess contract critical
+### Install Production Dependencies
 
----
-
-## Upgrade Recommendations
-
-| Package | Current | Latest | Recommendation |
-|---------|---------|--------|-----------------|
-| @slack/bolt | ^3.22.0 | 3.x | Safe (minor version) |
-| discord.js | ^14.16.0 | 14.x | Safe (minor version) |
-| telegraf | ^4.16.0 | 4.x | Safe (minor version) |
-| express | ^4.21.0 | 4.x | Safe (minor version) |
-| p-queue | ^8.0.0 | 8.x | Review before upgrading |
-| zod | ^3.24.0 | 3.x | Safe (minor version) |
-| simple-git | ^3.27.0 | 3.x | Safe (minor version) |
-| winston | ^3.17.0 | 3.x | Safe (minor version) |
-
-**No Major Version Upgrades Required** for current stability.
-
----
-
-## Transitive Dependencies (Top Level)
-
-Note: Package-lock.json contains full transitive tree. Key direct dependencies only listed above.
-
-**High-Level Transitive Risks**:
-- @slack/bolt → async, got (HTTP client)
-- discord.js → dependencies on websocket, serialization libraries
-- express → body-parser, cookie-parser, middleware ecosystem
-
-**Mitigation**: Lock all versions in package-lock.json; run `npm audit` regularly.
-
----
-
-## Import Path Analysis
-
-### Relative Imports (Internal)
-```typescript
-import { ProjectRouter } from '../router/project-router.js'
-import type { ChannelMessage } from '../types/index.js'
-import { logger } from '../utils/logger.js'
+```bash
+npm install
 ```
 
-All use relative paths with `.js` extensions (ESM convention).
+Installs all packages listed in `dependencies` (13 packages).
 
-### Absolute Imports (External)
-```typescript
-import { spawn } from 'node:child_process'    // Node.js builtin
-import { readFileSync } from 'node:fs'        // Node.js builtin
-import express from 'express'                  // npm
-import { App } from '@slack/bolt'              // npm scoped
+### Install All Dependencies (with dev tools)
+
+```bash
+npm install --save-dev
 ```
 
-Clear separation between builtin (node:) and npm packages.
+Installs both `dependencies` and `devDependencies` (21 packages total).
 
----
+### Build
 
-## Dependency Conflict Matrix
+```bash
+npm run build
+```
 
-| Conflict | Risk | Mitigation |
-|----------|------|-----------|
-| Multiple HTTP servers (express + slack/bolt) | Low | Express for health; Bolt for Slack webhooks (separate ports) |
-| Multiple async patterns (promises vs async/await) | Low | Codebase uses async/await consistently |
-| Node.js version mismatch | Medium | Enforce Node.js 20+ LTS in CI/dockerfile |
-| Workspace isolation (projects) | Medium | Git worktrees per task; no shared mutable state |
+Runs `tsc` to compile TypeScript to `dist/` directory.
 
----
+Output: ESM JavaScript with source maps and type declarations (.d.ts files).
 
-## Dependency Size Profile
+### Development Mode
 
-| Category | Count | Size Impact |
-|----------|-------|-------------|
-| Node.js builtins | 3 | ~0 (included in runtime) |
-| Logging | 1 | ~500 KB |
-| HTTP + adapters | 6 | ~15 MB |
-| Queueing | 1 | ~200 KB |
-| Git | 1 | ~500 KB |
-| Config | 3 | ~1 MB |
-| Type defs | 2 | ~0 (TS only) |
-| **Total** | **18** | **~18 MB** |
+```bash
+npm run dev
+```
 
----
+Runs `tsx watch src/index.ts` for live reloading.
 
-**Version**: 0.1.0
-**Last Updated**: 2026-03-21
-**Audit**: npm audit clean (no vulnerabilities)
+### Testing
+
+```bash
+npm run test                   # Run all tests once
+npm run test:watch            # Run tests in watch mode
+npm run coverage              # Generate coverage report
+```
+
+### Linting
+
+```bash
+npm run lint
+npm run typecheck            # Type-only checking (tsc --noEmit)
+```
+
+## External API Versions
+
+### Claude API (via CLI subprocess)
+
+- **Claude CLI binary**: Required in PATH
+- **API Version**: Latest Claude models (configurable per domain/capability)
+- **Authentication**: CLAUDE_API_KEY environment variable
+
+### GitHub API (via simple-git)
+
+- **Usage**: Worktree operations (git worktree add/remove)
+- **Authentication**: Via local git config (SSH keys or credentials)
+- **Version**: Git 2.34+ required
+
+## Dependency Vulnerability Scanning
+
+Run periodic audits:
+
+```bash
+npm audit                     # List vulnerabilities
+npm audit fix                 # Auto-fix compatible vulnerabilities
+npm audit fix --force         # Force upgrades (may break compatibility)
+```
+
+### Known Safe Updates
+
+Monitor for updates via `npm outdated`:
+
+```bash
+npm outdated                  # List packages with newer versions available
+```
+
+## Dependency Size Impact
+
+### Total Size Analysis
+
+- **Production bundle**: ~45 MB (node_modules with all dependencies)
+- **Compiled output**: ~2 MB (dist/ with minification)
+- **Docker image**: ~180 MB (Node.js 22 + dependencies)
+
+### Largest Packages by Size
+
+1. `discord.js` - 2.8 MB (native dependencies)
+2. `@slack/bolt` - 1.5 MB
+3. `imapflow` - 0.8 MB
+4. `telegraf` - 0.7 MB
+5. `simple-git` - 0.5 MB
+
+### Size Optimization Opportunities
+
+- Split channel adapters into optional packages (lazy loading)
+- Tree-shake unused Winston transports
+- Consider lightweight alternatives to some adapters
+
+## Security Considerations
+
+### Secrets Management
+
+- **NEVER commit**: `.env`, `.env.local`, API keys
+- **Load via environment**: `dotenv` loads from `.env` at runtime (dev only)
+- **Production**: Use environment variables directly (no .env file)
+
+### Dependency Audit
+
+- Run `npm audit` before production deployments
+- Enable automated dependency updates via GitHub Dependabot
+- Review changelogs for breaking changes in major versions
+
+### Safe Defaults
+
+- All third-party inputs validated via Zod schemas
+- SQL injection N/A (no database access in current scope)
+- CSRF N/A (no user sessions in current scope)
+- XSS N/A (no rendering of user content)

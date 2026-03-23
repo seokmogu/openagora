@@ -15,10 +15,6 @@ if command -v moai &> /dev/null; then
 	exec moai hook notification < "$temp_file"
 fi
 
-# Try detected Go bin path from initialization
-if [ -f "/home/hackit/go/bin/moai" ]; then
-	exec "/home/hackit/go/bin/moai" hook notification < "$temp_file"
-fi
 
 # Try default ~/go/bin/moai
 if [ -f "$HOME/go/bin/moai" ]; then

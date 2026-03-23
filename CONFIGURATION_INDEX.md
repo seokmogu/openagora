@@ -120,7 +120,7 @@ Template for all environment variables required by OpenAgora.
 10. **System**
     - `NODE_ENV`: production or development
     - `LOG_LEVEL`: debug, info, warn, error
-    - `BASE_PROJECT_DIR`: /home/hackit/project
+    - `BASE_PROJECT_DIR`: ~/project (defaults to $HOME/project)
     - `HEALTH_PORT`: Health check port (default: 3001)
 
 ## 5. docker-compose.yml
@@ -134,9 +134,9 @@ Docker Compose configuration for production deployment.
 - **Restart**: unless-stopped
 - **Network**: host (direct access)
 - **Volumes**:
-  - `/home/hackit/project` (project directory)
-  - `/home/hackit/.claude` (Claude config, read-only)
-  - `/home/hackit/bin` (utilities, read-only)
+  - `$HOME/project` (project directory)
+  - `$HOME/.claude` (Claude config, read-only)
+  - `$HOME/bin` (utilities, read-only)
   - `./logs` (application logs)
   - `./registry` (runtime registry)
 - **Environment**: Loaded from .env file
@@ -179,8 +179,8 @@ Systemd service unit for production deployment.
 
 **Configuration:**
 - **Type**: simple
-- **User**: hackit
-- **Working Directory**: /home/hackit/project/openagora
+- **User**: openagora
+- **Working Directory**: /opt/openagora/app (configurable)
 - **Environment File**: .env
 - **Restart Policy**: always with 5-second interval
 - **Logging**: to system journal (journalctl)
@@ -343,4 +343,4 @@ curl http://localhost:3001/metrics
 
 **Created**: March 2026
 **Version**: 1.0.0
-**Location**: /home/hackit/project/openagora/
+**Location**: https://github.com/seokmogu/openagora

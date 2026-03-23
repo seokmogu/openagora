@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import type { QueuedTask } from '../types/index.js';
+import { homeDir } from '../utils/platform.js';
 import { logger } from '../utils/logger.js';
 import { CircuitBreakerRegistry } from '../health/circuit-breaker.js';
 import { ProcessWatcher } from '../health/process-watcher.js';
@@ -106,7 +107,13 @@ export class AgentExecutor {
       const child = spawn('claude', args, {
         cwd,
         stdio: ['ignore', 'pipe', 'pipe'],
-        env: { ...process.env },
+        env: {
+          PATH: process.env['PATH'] ?? '/usr/local/bin:/usr/bin:/bin',
+          HOME: process.env['HOME'] ?? homeDir(),
+          NODE_ENV: process.env['NODE_ENV'] ?? 'production',
+          ANTHROPIC_API_KEY: process.env['ANTHROPIC_API_KEY'] ?? '',
+          CLAUDE_CODE_MAX_TURNS: process.env['CLAUDE_CODE_MAX_TURNS'] ?? '',
+        },
         detached: true, // allows process group kill
       });
 

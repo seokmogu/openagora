@@ -1,205 +1,195 @@
-# OpenAgora Architecture & Structure
+# Project Structure
 
-## Directory Tree
+## Directory Organization
 
 ```
 openagora/
-├── src/
-│   ├── adapters/              # Channel integration layer
-│   │   ├── base.ts           # BaseAdapter abstract class
-│   │   ├── manager.ts        # AdapterManager orchestrates all adapters
-│   │   ├── slack.ts          # Slack/Bolt integration
-│   │   ├── discord.ts        # Discord.js integration
-│   │   ├── telegram.ts       # Telegraf integration
-│   │   ├── email.ts          # Email adapter (SMTP + IMAP)
-│   │   ├── webhook.ts        # HTTP webhook receiver
-│   │   └── cli.ts            # Interactive CLI interface
+├── src/                               # TypeScript source code (8,380 lines)
+│   ├── adapters/                      # Channel adapters (6 channels + manager)
+│   │   ├── base.ts                    # Abstract adapter interface
+│   │   ├── slack.ts                   # Slack Socket Mode integration
+│   │   ├── discord.ts                 # Discord.js bot adapter
+│   │   ├── telegram.ts                # Telegraf bot adapter
+│   │   ├── email.ts                   # IMAP/SMTP email integration
+│   │   ├── webhook.ts                 # Express HTTP webhook receiver
+│   │   ├── cli.ts                     # Interactive CLI adapter
+│   │   ├── manager.ts                 # Coordinate all adapters
+│   │   └── __tests__/                 # Adapter tests (6 files)
 │   │
-│   ├── agents/                # Agent execution & management
-│   │   ├── registry.ts        # Agent registry and discovery
-│   │   ├── executor.ts        # Task execution engine
-│   │   ├── builder-agent.ts   # Dynamic agent generation
-│   │   └── p2p-router.ts      # Agent-to-agent communication
+│   ├── agents/                        # Agent implementations
+│   │   ├── executor.ts                # Execute tasks, manage agent lifecycle
+│   │   ├── registry.ts                # Register/lookup agents and their capabilities
+│   │   ├── builder-agent.ts           # Dynamically create specialized agents
+│   │   ├── p2p-router.ts              # Direct agent-to-agent messaging
+│   │   └── __tests__/                 # Agent tests (3 files)
 │   │
-│   ├── router/                # Central task routing
-│   │   ├── project-router.ts  # Main task router and dispatcher
-│   │   ├── project-creator.ts # Project initialization
-│   │   └── registry.ts        # Project registry (in-memory store)
+│   ├── models/                        # Multi-model router and orchestration
+│   │   ├── router.ts                  # Select best model per task type
+│   │   ├── multi-stage.ts             # 3-stage pipeline: Claude→Review→Verify
+│   │   └── __tests__/                 # Model tests (2 files)
 │   │
-│   ├── models/                # Model execution pipeline
-│   │   ├── multi-stage.ts     # Multi-stage orchestrator (Claude → Codex → Gemini)
-│   │   └── router.ts          # Model selection and routing logic
+│   ├── router/                        # Central dispatch hub
+│   │   ├── project-router.ts          # Route tasks to projects, manage lifecycle
+│   │   ├── project-creator.ts         # Spawn new projects with git init
+│   │   ├── registry.ts                # Load/save project registry
+│   │   ├── command-parser.ts          # Parse channel messages to tasks
+│   │   └── __tests__/                 # Router tests (3 files)
 │   │
-│   ├── health/                # Health & reliability systems
-│   │   ├── daemon.ts          # Main health daemon process
-│   │   ├── health-monitor.ts  # Health checks and metrics
-│   │   ├── circuit-breaker.ts # Circuit breaker pattern (5 failures = trip)
-│   │   ├── process-watcher.ts # Zombie process detection
-│   │   ├── ralph-loop.ts      # Stagnation detection & auto-recovery
-│   │   ├── task-discovery.ts  # Active task monitoring
-│   │   ├── notifier.ts        # Event notifications
-│   │   ├── worktree.ts        # Git worktree isolation management
-│   │   └── __tests__/         # Health system unit tests
+│   ├── queue/                         # Task management
+│   │   ├── project-queue.ts           # Per-project FIFO task queue
+│   │   └── __tests__/                 # Queue tests (1 file)
 │   │
-│   ├── queue/                 # Task queueing
-│   │   ├── project-queue.ts   # Per-project FIFO queue with concurrency control
-│   │   └── __tests__/         # Queue unit tests
+│   ├── health/                        # Health monitoring (8 submodules)
+│   │   ├── daemon.ts                  # Main health daemon coordinator
+│   │   ├── ralph-loop.ts              # Detect stagnation (>N iterations no improvement)
+│   │   ├── circuit-breaker.ts         # Auto-shutdown after 5 failures
+│   │   ├── health-monitor.ts          # Periodic health checks
+│   │   ├── process-watcher.ts         # Monitor agent processes
+│   │   ├── worktree.ts                # Git worktree isolation manager
+│   │   ├── notifier.ts                # Send alerts/status updates
+│   │   ├── task-discovery.ts          # Resume tasks on restart
+│   │   └── __tests__/                 # Health tests (8 files)
 │   │
-│   ├── config/                # Configuration system
-│   │   └── loader.ts          # YAML config parser and loader
+│   ├── config/                        # Configuration loading
+│   │   ├── loader.ts                  # Load all config files
+│   │   └── __tests__/                 # Config tests (1 file)
 │   │
-│   ├── types/                 # TypeScript type definitions
-│   │   └── index.ts           # Zod schemas and types
+│   ├── types/                         # Type definitions
+│   │   └── index.ts                   # Zod schemas for validation
 │   │
-│   ├── utils/                 # Shared utilities
-│   │   └── logger.ts          # Winston structured logging
+│   ├── cli/                           # Command-line interface
+│   │   ├── main.ts                    # CLI entry point and commands
+│   │   ├── setup.ts                   # Configuration wizard
+│   │   ├── env-manager.ts             # .env file helper
+│   │   └── tokens.ts                  # API token validation
 │   │
-│   └── index.ts               # Application entry point
+│   ├── utils/                         # Utilities
+│   │   └── logger.ts                  # Winston logging configuration
+│   │
+│   ├── index.ts                       # Main entry point (app startup)
+│   └── __tests__/                     # Shared fixtures
+│       └── fixtures.ts
 │
-├── dist/                       # Compiled JavaScript (generated)
-├── node_modules/              # Dependencies
-├── tsconfig.json              # TypeScript configuration
-├── package.json               # Project metadata & scripts
-├── .gitignore                 # Git exclude patterns
-└── .env.example               # Example environment variables
-```
-
-## Directory Purposes
-
-### `/src/adapters/`
-Normalizes messages from diverse channels into a unified format. Each adapter implements the `BaseAdapter` interface and handles channel-specific authentication, message formatting, and response delivery.
-
-**Key Concepts:**
-- `BaseAdapter` — Abstract class defining the adapter contract
-- `AdapterManager` — Starts/stops all adapters and manages their lifecycle
-- Channel-specific implementations (Slack, Discord, etc.) extend BaseAdapter
-
-### `/src/agents/`
-Manages agent discovery, execution, and coordination.
-
-**Key Concepts:**
-- `registry.ts` — Stores agent definitions (type, model preference, capabilities)
-- `executor.ts` — Executes tasks through the model pipeline
-- `builder-agent.ts` — Dynamically generates specialized agents for novel domains
-- `p2p-router.ts` — Enables direct agent-to-agent communication for complex workflows
-
-### `/src/router/`
-The central hub that receives normalized messages from adapters and routes them to appropriate agents.
-
-**Key Concepts:**
-- `project-router.ts` — Receives messages, routes to agents, manages task lifecycle
-- `project-creator.ts` — Initializes projects with their task queues and git repositories
-- `registry.ts` — In-memory store of active projects and their metadata
-
-### `/src/models/`
-Implements the multi-stage model execution pipeline.
-
-**Key Concepts:**
-- `multi-stage.ts` — Orchestrates Claude → Codex → Gemini flow
-- `router.ts` — Selects appropriate models based on task characteristics
-
-### `/src/health/`
-Comprehensive health monitoring and self-healing mechanisms.
-
-**Key Concepts:**
-- `daemon.ts` — Runs health checks on a schedule
-- `circuit-breaker.ts` — Trips after 5 consecutive failures, auto-recovers
-- `process-watcher.ts` — Detects zombie processes from crashed agents
-- `ralph-loop.ts` — Detects stagnant tasks and triggers recovery
-- `worktree.ts` — Manages git worktrees (one per task) for safe concurrent execution
-- `task-discovery.ts` — Monitors active task execution
-
-### `/src/queue/`
-Per-project task queuing with configurable concurrency.
-
-**Key Concepts:**
-- Each project has its own FIFO queue
-- Concurrency control prevents race conditions
-- Tasks are dequeued and dispatched to agents
-
-### `/src/config/`
-Loads and parses YAML configuration files.
-
-### `/src/types/`
-Centralized TypeScript interfaces and Zod validation schemas for runtime type safety.
-
-### `/src/utils/`
-Shared utilities, primarily structured logging with Winston.
-
-## Module Relationships
+├── config/                            # Configuration files
+│   ├── channels.yaml                  # Channel activation and credentials
+│   ├── models.yaml                    # Model assignments and capabilities
+│   └── mcp.json                       # MCP server configurations
+│
+├── registry/                          # Runtime registry (persisted)
+│   ├── projects.json                  # Active projects and paths
+│   └── agents.json                    # Registered agents and specs
+│
+├── .moai/project/                     # MoAI project documentation
+│   ├── product.md                     # Product overview and use cases
+│   ├── structure.md                   # This file
+│   └── tech.md                        # Technology stack
+│
+├── .claude/                           # Claude Code integration
+│   ├── agents/                        # Agent definitions
+│   ├── rules/                         # Development rules
+│   ├── skills/                        # Custom skills
+│   └── hooks/                         # Lifecycle hooks
+│
+├── bin/                               # Executable scripts
+│   └── openagora.js                   # CLI entry point
+│
+├── dist/                              # Compiled TypeScript output
+│
+├── package.json                       # Dependencies and scripts
+├── tsconfig.json                      # TypeScript configuration
+├── vitest.config.ts                   # Test runner configuration
+├── .env.example                       # Environment template
+├── .gitignore                         # Git exclusions
+├── README.md                          # User documentation
+├── CLAUDE.md                          # MoAI execution directive
+├── SPEC.md                            # Feature specifications
+└── openagora.service                  # Systemd service definition
 
 ```
-┌─────────────────────────────────────────────────────┐
-│ index.ts (Application Entry)                        │
-└──────────────┬──────────────────────────────────────┘
-               │
-      ┌────────┴────────────────┐
-      ▼                         ▼
-┌─────────────┐         ┌──────────────┐
-│ Adapters    │         │ HealthDaemon │
-│ (receive)   │         │ (monitor)    │
-└──────┬──────┘         └──────┬───────┘
-       │                       │
-       │                ┌──────▼────────┐
-       │                │ ProcessWatcher│
-       │                │ CircuitBreaker│
-       │                │ RalphLoop     │
-       │                │ Worktree      │
-       │                └───────────────┘
-       │
-       ▼
-┌─────────────────┐
-│ ProjectRouter   │ ◄─────── (coordinates)
-│ (dispatch)      │
-└────────┬────────┘
-         │
-    ┌────┴─────┐
-    ▼          ▼
-┌────────┐  ┌─────────┐
-│ Queue  │  │ Agents  │
-│ (FIFO) │  │(execute)│
-└────────┘  └────┬────┘
-                 │
-                 ▼
-          ┌─────────────┐
-          │ Models      │
-          │ (verify)    │
-          └─────────────┘
-```
 
-## Architecture Layers
+## Component Purposes
 
-### 1. Adapter Layer (Input)
-Receives user messages from external channels and normalizes them into a standard message format.
+### Adapters (`src/adapters/`)
+Normalize incoming messages from different channels into unified Task objects. Each adapter implements:
+- Message receiving (async polling or webhooks)
+- Message parsing (extract task, priority, metadata)
+- Message sending (format responses back to channel)
+- Connection lifecycle management
 
-### 2. Router Layer (Dispatch)
-Parses normalized messages, determines which agent should handle the task, and enqueues work.
+**Flow:** Channel → Adapter → ProjectRouter → Queue
 
-### 3. Queue Layer (Serialization)
-Maintains per-project FIFO queues with concurrency limits to prevent race conditions.
+### Agents (`src/agents/`)
+Execute tasks autonomously and manage agent lifecycle:
+- **Executor**: Spawn and monitor agent subprocesses
+- **Registry**: Track available agents and their roles
+- **Builder**: Create new specialized agents on-demand
+- **P2P Router**: Enable direct agent-to-agent communication
 
-### 4. Agent Layer (Execution)
-Executes tasks using the agent registry, calling the selected agent with task context.
+### Models (`src/models/`)
+Select and orchestrate AI models for different task types:
+- **Router**: Match task characteristics to optimal model (coding→Claude, research→Perplexity)
+- **MultiStage**: Implement 3-stage verification pipeline (Claude implements → Codex reviews → Gemini verifies)
 
-### 5. Model Layer (Verification)
-Routes agent output through multi-stage verification (Claude → Codex review → Gemini verify).
+### Router (`src/router/`)
+Central dispatch hub coordinating all components:
+- **ProjectRouter**: Accept tasks, look up projects, queue execution
+- **ProjectCreator**: Initialize new projects with git repository
+- **Registry**: Persist project and agent metadata to disk
+- **CommandParser**: Transform channel commands into structured tasks
 
-### 6. Health Layer (Reliability)
-Monitors task execution, detects failures, manages circuit breakers, and initiates recovery.
+### Queue (`src/queue/`)
+Manage per-project task execution order:
+- Per-project FIFO ensures sequential, isolated execution
+- Prevents concurrent modification conflicts
+- Supports task priority and retry logic
 
-### 7. Persistence Layer (Isolation)
-Manages git worktrees per task and ensures clean, isolated execution environments.
+### Health (`src/health/`)
+Monitor system stability and prevent degradation:
+- **Daemon**: Orchestrate all health subsystems
+- **RalphLoop**: Detect iteration stagnation (no improvement N iterations)
+- **CircuitBreaker**: Auto-shutdown after 5 consecutive failures
+- **HealthMonitor**: Periodic checks (CPU, memory, queue depth)
+- **ProcessWatcher**: Track subprocess lifecycle and resource usage
+- **Worktree**: Manage isolated git workspaces per agent
+- **Notifier**: Send alerts and status updates
+- **TaskDiscovery**: Resume incomplete tasks after restart
 
-## Key File Locations & Roles
+### Config (`src/config/`)
+Load and validate configuration:
+- channels.yaml → which adapters to activate
+- models.yaml → model assignments per task type
+- mcp.json → MCP server endpoints
+- Environment variables → API keys and system settings
 
-| File | Purpose |
-|------|---------|
-| `src/index.ts` | Application bootstrap, initializes daemon, router, adapters |
-| `src/router/project-router.ts` | Central message dispatcher and agent coordinator |
-| `src/adapters/manager.ts` | Lifecycle management for all channel adapters |
-| `src/agents/executor.ts` | Invokes agents and manages task execution flow |
-| `src/health/daemon.ts` | Main health monitoring process |
-| `src/health/worktree.ts` | Git worktree creation and cleanup |
-| `src/queue/project-queue.ts` | Per-project task queue implementation |
-| `src/models/multi-stage.ts` | Multi-stage model execution pipeline |
-| `src/types/index.ts` | Zod schemas for all data structures |
+### CLI (`src/cli/`)
+Provide command-line interface for operators:
+- `openagora setup` – Interactive configuration wizard
+- `openagora run <project> <task>` – Execute task directly
+- `openagora projects list` – Show active projects
+- Token validation and .env management
+
+### Types (`src/types/`)
+Zod schemas for runtime validation:
+- Task, Agent, Project, Config types with validation
+- Ensures type safety at system boundaries
+
+### Utils (`src/utils/`)
+Shared utilities:
+- Winston logger with structured logging
+- JSON and error formatting
+
+## Test Organization
+
+**25 test files, 232+ tests covering:**
+- Core executors and orchestrators
+- All 6 adapters + manager
+- Agent registry and P2P routing
+- Health subsystems (8 test files)
+- Model router and multi-stage pipeline
+- Config loading and validation
+
+Test conventions:
+- `*.test.ts` or `*.spec.ts` file naming
+- Vitest for fast execution
+- Fixtures for shared test data
+- 85%+ target coverage per module

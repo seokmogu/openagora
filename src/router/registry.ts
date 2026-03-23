@@ -1,4 +1,6 @@
 import fs from 'node:fs/promises';
+import { join } from 'node:path';
+import { defaultBaseDir } from '../utils/platform.js';
 import { logger } from '../utils/logger.js';
 import type { Project, DomainType } from '../types/index.js';
 
@@ -71,7 +73,7 @@ export class ProjectRegistry {
     const project: Project = {
       id,
       name: params.name,
-      path: `/home/${params.githubUser}/project/${id}`,
+      path: join(defaultBaseDir(), id),
       githubRepo: `${params.githubUser}/${id}`,
       domain: params.domain,
       agents: [],

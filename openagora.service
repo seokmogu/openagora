@@ -1,18 +1,42 @@
 [Unit]
 Description=OpenAgora Multi-Agent Orchestration
-After=network.target
+After=network-online.target
+Wants=network-online.target
+Documentation=https://github.com/seokmogu/openagora
 
 [Service]
 Type=simple
-User=hackit
-WorkingDirectory=/home/hackit/project/openagora
-EnvironmentFile=/home/hackit/project/openagora/.env
-Environment=PATH=/home/hackit/.local/bin:/usr/local/bin:/usr/bin:/bin
-ExecStart=/home/hackit/.local/bin/node dist/index.js
+User=openagora
+Group=openagora
+
+# Paths - adjust these for your environment
+WorkingDirectory=/opt/openagora/app
+EnvironmentFile=/opt/openagora/app/.env
+ExecStart=/usr/bin/node dist/index.js
+
+# Process management
 Restart=always
-RestartSec=5
+RestartSec=10
+TimeoutStopSec=30
+KillMode=control-group
+KillSignal=SIGTERM
+
+# Security hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=tmpfs
+ReadWritePaths=/opt/openagora/projects /opt/openagora/data /opt/openagora/logs
+PrivateTmp=yes
+PrivateDevices=yes
+
+# Resource limits
+LimitNPROC=512
+LimitNOFILE=8192
+
+# Logging
 StandardOutput=journal
 StandardError=journal
+SyslogIdentifier=openagora
 
 [Install]
 WantedBy=multi-user.target

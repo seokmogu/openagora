@@ -1,255 +1,278 @@
 # OpenAgora Architecture Overview
 
-## High-Level System Summary
+## System Identity
 
-OpenAgora is a multi-agent orchestration platform that receives tasks from multiple channels (Slack, Discord, Telegram, Email, Webhook, CLI), routes them through domain-aware expert agents, and executes them with multi-stage validation and quality gates.
+OpenAgora is a multi-agent orchestration platform that coordinates Claude agents across multiple communication channels. The system uses event-driven architecture with plugin-based adapters, enabling seamless task routing and execution across Slack, Discord, Telegram, Email, Webhooks, and CLI.
 
-The system solves eight critical problems:
-- **P1**: Multi-channel concurrent request collisions → Project-specific FIFO queues
-- **P2**: Zombie heartbeat processes → ProcessWatcher + SIGKILL on timeout
-- **P3**: Work continuation across heartbeat intervals → Circuit breaker + state tracking
-- **P4**: Parallel project code conflicts → Git worktrees per task
-- **P5**: Fixed agent architecture → Dynamic agent generation via BuilderAgent
-- **P6**: Unstable 24-hour autonomous operation → Ralph loop + convergence detection
-- **P7**: Single-model dependency → Multi-model router (Claude, Codex, Gemini)
-- **P8**: Missing external tool integration → Capability-based routing system
+## Core Design Patterns
 
-## System Design Patterns
+### 1. Event-Driven Architecture
 
-### 1. Queue-per-Project Pattern
-Each project maintains its own FIFO queue with concurrency=1 (P1 solution). This ensures:
-- No channel collision (Slack and Discord requests don't interfere)
-- Strict ordering within a project
-- Clear visibility into pending work
-
-### 2. Domain-Driven Agent Routing
-Tasks are classified by domain and routed to specialized agents:
-- `planning` → expert-planner
-- `development` → expert-developer
-- `database` → expert-dba
-- `analysis` → expert-analyst
-- `research` → expert-researcher
-- `writing` → expert-writer
-- `general` → expert-developer (fallback)
-
-New domains trigger BuilderAgent to create custom experts on-the-fly (P5 solution).
-
-### 3. Multi-Stage Execution Pipeline
-```
-Primary (Claude) → Review (Codex) → Verify (Gemini) → Convergence Check
-```
-
-All three stages are best-effort with timeouts. Only primary blocks; review and verify are for quality improvement. RalphLoop detects convergence and prevents infinite retries.
-
-### 4. Capability-Based Model Routing
-Domains map to capabilities, which map to multi-model routes:
-- `best-coding` → Claude for implementation
-- `best-analysis` → Gemini for long-context analysis
-- `best-research` → Perplexity for web search
-- `best-writing` → Claude Opus for academic work
-- `best-ui` → v0 (Vercel) for UI design
-- `best-image` → DALL-E 3, Midjourney, or Flux
-
-### 5. Health-Driven Autonomous Loop
-HealthDaemon runs checks every 10 minutes:
-- ProcessWatcher detects zombie processes and kills them (P2 solution)
-- TaskDiscovery finds incomplete work and re-enqueues it (P3 solution)
-- Circuit breakers open after 5 consecutive failures
-- TeammateIdle gate prevents work from marking complete until LSP passes
-
-### 6. Isolated Execution via Worktrees
-Each task creates a separate git worktree for isolated code changes (P4 solution):
-- No file conflicts between parallel tasks
-- Clean rollback on failure (worktree deletion)
-- Concurrent project work safe
-
-## System Boundaries
-
-### In Scope
-- Multi-channel message ingestion (6 adapters)
-- Project and task lifecycle management
-- Domain detection and agent routing
-- Multi-stage execution orchestration
-- Health monitoring and autonomous recovery
-- Dynamic agent generation
-- Multi-model evaluation
-
-### Out of Scope
-- LLM fine-tuning or model training
-- Direct cloud infrastructure provisioning (only git-based)
-- Real-time communication (async only)
-- Complex workflow definitions (simple routing logic)
-- Persistent task history (state lives in process memory)
-
-## Architecture Decision Records (ADRs)
-
-### ADR-001: Project-Scoped Queues (P1)
-**Decision**: Use one queue per project with concurrency=1.
-
-**Rationale**: Prevents channel collision while maintaining simplicity. Slack and Discord can send concurrent requests; they're queued separately per project.
-
-**Alternatives Rejected**:
-- Global queue with locking: Too coarse-grained
-- Per-channel queue: Allows channel cross-talk
-- Async fire-and-forget: No guarantee of order or completion
-
----
-
-### ADR-002: Worktree Isolation (P4)
-**Decision**: Create a separate git worktree for each task execution.
-
-**Rationale**: Guarantees file-system isolation between parallel tasks on the same project. Prevents git conflicts and race conditions.
-
-**Alternatives Rejected**:
-- Copy entire repo per task: Too slow
-- Shared checkout with file locking: Deadlock risk
-- In-memory virtual filesystem: Complex and fragile
-
----
-
-### ADR-003: Multi-Stage Validation (P7)
-**Decision**: Primary (Claude) → Review (Codex) → Verify (Gemini), all best-effort.
-
-**Rationale**: Reduces model dependency. Claude handles coding; Codex reviews for style/security; Gemini verifies logic independently. All stages have timeouts; only primary blocks.
-
-**Alternatives Rejected**:
-- Single model only: No diversity, single point of failure
-- Sequential required stages: Too slow
-- All stages blocking: Cascading timeouts
-
----
-
-### ADR-004: RalphLoop for Convergence (P6)
-**Decision**: Use RalphLoop to detect stagnation and force convergence after max iterations.
-
-**Rationale**: Prevents infinite retry loops in 24-hour autonomous mode. Stagnation detection compares verify output; identical feedback triggers automatic exit.
-
-**Alternatives Rejected**:
-- Fixed max iterations: Misses useful feedback
-- Simple timeout: Wastes time on low-risk retries
-- No retry mechanism: Loses correction opportunities
-
----
-
-### ADR-005: Dynamic Agent Generation (P5)
-**Decision**: BuilderAgent creates new specialist agents on-demand via `.claude/agents/moai/`.
-
-**Rationale**: System learns and evolves. New domains don't require code changes; they trigger agent generation.
-
-**Alternatives Rejected**:
-- Hardcoded agent list: No flexibility
-- Prompt-injection approach: No persistence
-- Manual agent registry updates: Too slow
-
----
-
-### ADR-006: Circuit Breaker for Fault Isolation
-**Decision**: Open circuit after 5 consecutive failures; half-open after 1 success.
-
-**Rationale**: Prevents cascading failures. Failing agents are automatically deprioritized.
-
-**Alternatives Rejected**:
-- Exponential backoff: No hard cutoff
-- Manual intervention: Not autonomous
-- No fault isolation: Cascading failures
-
----
-
-## System Architecture Diagram
+All incoming messages flow through a normalized event pipeline:
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                      CHANNEL ADAPTERS (External)                         │
-│  ┌──────────┐ ┌─────────┐ ┌────────────┐ ┌──────┐ ┌──────────┐ ┌─────┐ │
-│  │  Slack   │ │ Discord │ │ Telegram   │ │Email │ │Webhook   │ │ CLI │ │
-│  └────┬─────┘ └────┬────┘ └────┬───────┘ └──┬───┘ └────┬─────┘ └─┬───┘ │
-└───────┼──────────────┼──────────┼────────────┼──────────┼──────────┼─────┘
-        │ Normalized   │          │            │          │          │
-        │ ChannelMessage           │            │          │          │
-        └──────────────┴──────────┴────────────┴──────────┴──────────┘
-                               │
-                      ┌────────▼────────┐
-                      │  PROJECT ROUTER │
-                      │                 │
-                      │ • Registry      │
-                      │ • Domain detect │
-                      │ • Project match │
-                      │ • Job creation  │
-                      └────────┬────────┘
-                               │
-        ┌──────────────────────┴──────────────────────┐
-        │ Queue (Project-Scoped, Concurrency=1)       │
-        │ ┌────┐ ┌────┐ ┌────┐                       │
-        │ │Job1│ │Job2│ │Job3│  (FIFO per project)  │
-        │ └──┬─┘ └────┘ └────┘                       │
-        └────┼──────────────────────────────────────┘
-             │
-    ┌────────▼───────────┐
-    │ AGENT EXECUTOR     │
-    │ • Spawn claude CLI │
-    │ • Set agent flag   │
-    │ • Create worktree  │
-    │ • Run 30min timeout│
-    │ • Capture output   │
-    └────────┬───────────┘
-             │
-    ┌────────▼──────────────────────────┐
-    │ MULTI-STAGE ORCHESTRATOR          │
-    │                                    │
-    │ PRIMARY (Claude)                   │
-    │ ├─ Execution result                │
-    │ └─ P2P routing if needed           │
-    │                                    │
-    │ REVIEW (Codex, best-effort)        │
-    │ ├─ Timeout: 5 min                  │
-    │ └─ Status: ok|timeout|error        │
-    │                                    │
-    │ VERIFY (Gemini, best-effort)       │
-    │ ├─ Timeout: 5 min                  │
-    │ ├─ RalphLoop retry logic           │
-    │ └─ Convergence check               │
-    │                                    │
-    │ RESULT                             │
-    │ └─ Summary + all stages            │
-    └────────┬──────────────────────────┘
-             │
-    ┌────────▼──────────────────┐
-    │ HEALTH DAEMON             │
-    │ (Every 10 minutes)        │
-    │                            │
-    │ • ProcessWatcher          │
-    │   → SIGKILL on timeout    │
-    │                            │
-    │ • TaskDiscovery           │
-    │   → Detect incomplete     │
-    │   → Re-enqueue            │
-    │                            │
-    │ • CircuitBreakers         │
-    │   → Open after 5 failures │
-    │   → Half-open recovery    │
-    │                            │
-    │ • Health HTTP endpoint    │
-    │   → /health (JSON)        │
-    └───────────────────────────┘
+Channel Input (Slack/Discord/etc.)
+    ↓
+[Adapter] Normalizes to ChannelMessage
+    ↓
+[ProjectRouter] Dispatches to project-specific queue
+    ↓
+[ProjectQueue] FIFO task processing per project
+    ↓
+[AgentExecutor] Subprocess execution with timeouts
+    ↓
+Channel Output (via replyFn)
 ```
 
-## Key Components Summary
+The event-driven design enables:
+- Decoupling of input channels from business logic
+- Asynchronous task processing without blocking
+- Per-project isolation and priority management
 
-| Component | Responsibility | Key Files |
-|-----------|-----------------|-----------|
-| **Adapters** | Ingest from 6 channels, normalize to ChannelMessage | `src/adapters/*.ts` |
-| **ProjectRouter** | Central dispatch: match project, detect domain, enqueue | `src/router/project-router.ts` |
-| **ProjectQueue** | Per-project FIFO with concurrency=1 | `src/queue/project-queue.ts` |
-| **AgentExecutor** | Spawn claude CLI, worktree isolation, timeout handling | `src/agents/executor.ts` |
-| **AgentRegistry** | Maintain builtin + dynamic agents, domain→agent mapping | `src/agents/registry.ts` |
-| **MultiStageOrchestrator** | Pipeline: primary → review → verify → convergence | `src/models/multi-stage.ts` |
-| **HealthDaemon** | Monitor processes, discover tasks, run HTTP endpoint | `src/health/daemon.ts` |
-| **ModelRouter** | Map capabilities to model routes (Claude/Codex/Gemini) | `src/models/router.ts` |
-| **ProcessWatcher** | Track spawned processes, kill zombies | `src/health/process-watcher.ts` |
-| **RalphLoop** | Convergence detection and retry logic | `src/health/ralph-loop.ts` |
+### 2. Plugin Architecture (Adapter Pattern)
 
----
+**AdapterManager** orchestrates 6 pluggable channel adapters:
+- SlackAdapter (requires SLACK_BOT_TOKEN)
+- DiscordAdapter (requires DISCORD_BOT_TOKEN)
+- TelegramAdapter (requires TELEGRAM_BOT_TOKEN)
+- EmailAdapter (requires EMAIL_IMAP_HOST)
+- WebhookAdapter (always enabled)
+- CliAdapter (always enabled)
 
-**Version**: 0.1.0
-**Last Updated**: 2026-03-21
-**Status**: Active Development
+Each adapter:
+- Inherits from `BaseAdapter` interface
+- Implements `start()` / `stop()` lifecycle
+- Normalizes channel-specific messages to `ChannelMessage` type
+- Calls a shared `handleMessage()` callback via `setHandler()`
+
+Adapters are instantiated conditionally based on environment variables, enabling zero-configuration for unused channels.
+
+### 3. Strategy Pattern (Model Routing)
+
+**ModelRouter** implements strategy pattern for domain-aware model selection:
+
+```
+Task Domain (development | database | analysis | research | writing | planning | general)
+    ↓
+[ModelRouter] Maps to Capability (best-coding | best-analysis | best-writing | etc.)
+    ↓
+[MultiStageOrchestrator] Selects Primary Model → Review Model → Verify Model
+    ↓
+[AgentExecutor] Spawns claude CLI subprocess
+```
+
+Strategies:
+- **Primary Stage**: Executes main agent (Claude)
+- **Review Stage**: Optional secondary validation (Codex/GPT)
+- **Verify Stage**: Optional tertiary confirmation (Gemini)
+
+The strategy routing enables:
+- Domain-specific model optimization
+- Fallback handling when models unavailable
+- Quality gates based on task complexity
+
+### 4. Circuit Breaker Pattern (Fault Tolerance)
+
+**CircuitBreaker** protects against cascading failures:
+
+```
+Success Path:   CLOSED → success() → stays CLOSED
+Failure Path:   CLOSED → fail() → (5 failures) → OPEN
+Recovery Path:  OPEN → (timeout) → HALF_OPEN → success() → CLOSED
+                HALF_OPEN → fail() → OPEN
+```
+
+Per-agent circuit breakers prevent:
+- Repeated execution of failing agents
+- Resource exhaustion from failed subprocesses
+- Cascading failures across orchestrator
+
+## System Layers
+
+### Layer 1: Channel Adapters (Input)
+
+**Responsibility**: Normalize messages from external channels
+
+**Key Classes**:
+- `BaseAdapter` - Abstract interface
+- `SlackAdapter`, `DiscordAdapter`, etc. - Concrete implementations
+- `AdapterManager` - Lifecycle management
+
+**Characteristics**:
+- Stateless message transformation
+- No business logic (pure I/O)
+- Concurrent adapter execution
+
+### Layer 2: Project Router (Routing)
+
+**Responsibility**: Route messages to correct project, create projects, parse commands
+
+**Key Classes**:
+- `ProjectRouter` - Central dispatch hub
+- `ProjectRegistry` - In-memory project catalog
+- `ProjectCreator` - Dynamic project initialization
+- `CommandParser` - Parse `/run` `/setup` commands
+
+**Characteristics**:
+- Single point of entry for all messages
+- Manages project lifecycle (create, list, query)
+- Integrates with health daemon for process monitoring
+
+### Layer 3: Task Queue (Buffering)
+
+**Responsibility**: FIFO task buffering per project, priority ordering
+
+**Key Classes**:
+- `ProjectQueue` - Map of project queues
+- `QueuedTask` - Task envelope with priority + status
+
+**Characteristics**:
+- Per-project isolation (no cross-project interference)
+- Priority ordering within project
+- Status tracking (pending → running → completed/failed)
+
+### Layer 4: Agent Execution (Processing)
+
+**Responsibility**: Spawn agent processes, manage timeouts, track circuit breakers
+
+**Key Classes**:
+- `AgentExecutor` - Process spawner
+- `CircuitBreakerRegistry` - Per-agent fault protection
+- `ProcessWatcher` - Lifecycle monitoring
+- `WorktreeManager` - Git worktree isolation
+
+**Characteristics**:
+- 30-minute timeout per task
+- Circuit breaker prevents retry storms
+- Subprocess stdout/stderr captured
+- Git worktree isolation for agent-specific code
+
+### Layer 5: Model Orchestration (Quality)
+
+**Responsibility**: Multi-stage execution, convergence detection, fallback handling
+
+**Key Classes**:
+- `MultiStageOrchestrator` - 3-stage pipeline (Primary → Review → Verify)
+- `ModelRouter` - Domain-to-capability mapping
+- `RalphLoop` - Stagnation detection
+- `P2PRouter` - Agent-to-agent messaging
+
+**Characteristics**:
+- Primary stage always executes
+- Review/Verify stages conditional (timeout-gated at 5 min each)
+- Ralph Loop detects and breaks infinite loops
+- Converges when: verified OR quality gates met OR stagnation detected
+
+### Layer 6: Health Monitoring (Observability)
+
+**Responsibility**: Process health, circuit breaker status, task discovery
+
+**Key Classes**:
+- `HealthDaemon` - Orchestrates health checks
+- `HealthMonitor` - Status aggregation
+- `ProcessWatcher` - Track spawned processes
+- `TaskDiscovery` - Find orphaned/stalled tasks
+- `Notifier` - Alert on health state changes
+
+**Characteristics**:
+- 10-minute check interval
+- HTTP health endpoint (port 3001)
+- Automatic SIGKILL on 30-min timeout
+- Discovers and recovers orphaned tasks
+
+## Data Flow (Request → Response)
+
+```
+1. User Message (Slack/Discord/etc.)
+   ↓
+2. Adapter.handleMessage(msg)
+   ↓
+3. ProjectRouter.handleMessage(channelMessage)
+   ↓
+4. ProjectRegistry.getOrCreate(projectId)
+   ↓
+5. ProjectQueue.enqueue(task)
+   ↓
+6. [Dequeue] ProjectQueue.dequeue()
+   ↓
+7. AgentExecutor.run(task, agentId, projectPath)
+   ↓
+8. [Subprocess] claude CLI with prompt (30 min timeout)
+   ↓
+9. MultiStageOrchestrator.executeStages(task)
+   - Primary stage: execute agent
+   - Review stage: validate (if not timeout)
+   - Verify stage: confirm (if not timeout)
+   ↓
+10. [Success/Failure] Record result in task status
+   ↓
+11. Message.replyFn(result) → back to user channel
+```
+
+## External Integration Points
+
+### Runtime Dependencies
+
+**Communication Channels**:
+- `@slack/bolt` - Slack Bot API
+- `discord.js` - Discord Bot API
+- `telegraf` - Telegram Bot API
+- `nodemailer` + `imapflow` - Email (SMTP/IMAP)
+- `express` - HTTP webhook server
+
+**Utilities**:
+- `simple-git` - Git operations (worktree management)
+- `p-queue` - Task queue management
+- `winston` - Structured logging
+- `zod` - Runtime schema validation
+- `yaml` - Config file parsing
+- `dotenv` - Environment variable loading
+
+### Environment Configuration
+
+```
+SLACK_BOT_TOKEN       # Enable SlackAdapter
+DISCORD_BOT_TOKEN     # Enable DiscordAdapter
+TELEGRAM_BOT_TOKEN    # Enable TelegramAdapter
+EMAIL_IMAP_HOST       # Enable EmailAdapter
+GITHUB_USER           # GitHub username (for repos)
+CLAUDE_API_KEY        # Claude CLI auth
+```
+
+## Key Invariants
+
+1. **Project Isolation**: Tasks from different projects never interfere
+2. **Process Containment**: Each agent runs in isolated subprocess with hard 30-min timeout
+3. **Circuit Breaker Protection**: Failing agents are rapidly rejected after 5 consecutive failures
+4. **Convergence Guarantee**: Multi-stage pipeline always terminates (Ralph Loop prevents infinite loops)
+5. **Health Visibility**: All failures are discoverable via health endpoint and task discovery
+6. **Message Atomicity**: Each message is processed exactly once (idempotent handlers)
+
+## Error Handling Strategy
+
+```
+Error Type                      Handler
+─────────────────────────────────────────────────────────
+Adapter failure                 Log warning, skip adapter, continue
+Project creation failure        Reply to user, don't enqueue task
+Agent timeout (30 min)          ProcessWatcher SIGKILL, mark task failed
+Circuit breaker open            Immediately reject, don't spawn
+Multi-stage convergence fail    Log warning, return best result
+Health daemon failure           Log error, continue checks
+```
+
+## Extensibility Points
+
+1. **Add New Channel**: Create `src/adapters/NewChannelAdapter.ts`, instantiate in `AdapterManager`
+2. **Add New Agent Type**: Create agent definition in `.claude/agents/moai/`, register in `AgentRegistry`
+3. **Add New Model Strategy**: Extend `ModelRouter` with domain → capability mapping
+4. **Custom Health Checks**: Register custom check in `HealthMonitor.registerCheck()`
+5. **Worktree Strategies**: Extend `WorktreeManager` for custom isolation policies
+
+## Version & Tooling
+
+- **TypeScript**: 5.7+
+- **Runtime**: Node.js 22 (ESM)
+- **Testing**: Vitest with 85%+ coverage target
+- **Linting**: ESLint 9 with strict TypeScript rules
+- **Build**: `tsc` for compilation, `tsx` for dev watching

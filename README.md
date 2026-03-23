@@ -317,8 +317,8 @@ docker run -d \
   --name openagora \
   --restart unless-stopped \
   --network host \
-  -v /home/hackit/project:/home/hackit/project \
-  -v /home/hackit/.claude:/home/hackit/.claude:ro \
+  -v $HOME/project:$HOME/project \
+  -v $HOME/.claude:$HOME/.claude:ro \
   --env-file .env \
   openagora:latest
 ```
@@ -419,7 +419,7 @@ FIRECRAWL_API_KEY          # Firecrawl web scraper
 # System
 NODE_ENV                   # production or development
 LOG_LEVEL                  # debug, info, warn, error
-BASE_PROJECT_DIR           # /home/hackit/project
+BASE_PROJECT_DIR           # ~/project (defaults to $HOME/project)
 HEALTH_PORT                # 3001
 WEBHOOK_PORT               # 3000
 ```
@@ -490,7 +490,7 @@ User: "Audit smart contracts"
 Each agent gets an isolated git worktree:
 
 ```
-/home/hackit/project/
+~/project/
 ├── openagora/                 # main repo
 └── .claude/worktrees/
     ├── agent-backend-dev-xyz/

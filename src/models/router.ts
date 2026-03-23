@@ -35,8 +35,17 @@ export class ModelRouter {
   private config: ModelsYaml;
 
   constructor(configDir: string) {
-    const raw = readFileSync(join(configDir, 'models.yaml'), 'utf-8');
-    this.config = yaml.parse(raw) as ModelsYaml;
+    try {
+      const raw = readFileSync(join(configDir, 'models.yaml'), 'utf-8');
+      this.config = yaml.parse(raw) as ModelsYaml;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+        logger.warn('ModelRouter: models.yaml not found, using defaults', { configDir });
+        this.config = { capabilities: {}, models: {} };
+      } else {
+        throw err;
+      }
+    }
   }
 
   /** Get model names for a capability (primary + optional review/verify). */
