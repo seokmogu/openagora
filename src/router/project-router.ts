@@ -142,9 +142,14 @@ export class ProjectRouter {
         // Direct execution — no confirmation needed
         const taskContent = command.taskDescription;
 
-        // Use existing project if matched, otherwise run in openagora directory
+        // Use existing project if matched, otherwise run in a neutral workspace
         const project = await this.projectRegistry.matchProject(taskContent);
-        const projectPath = project?.path ?? process.cwd();
+        const neutralDir = join(this.baseDir, '.agora-workspace');
+        if (!project) {
+          const { mkdirSync, existsSync } = await import('node:fs');
+          if (!existsSync(neutralDir)) mkdirSync(neutralDir, { recursive: true });
+        }
+        const projectPath = project?.path ?? neutralDir;
         const domain = project?.domain ?? AgentExecutor.detectDomain(taskContent);
         const agentId = this.agentRegistry.getAgentForDomain(domain);
 
