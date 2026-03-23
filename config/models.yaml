@@ -1,8 +1,8 @@
 capabilities:
   best-coding:
     primary: claude
-    review: codex
-    verify: gemini
+    review: claude
+    verify: claude
 
   best-writing:
     primary: claude-opus
