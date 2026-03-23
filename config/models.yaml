@@ -1,7 +1,7 @@
 capabilities:
   best-coding:
     primary: claude
-    review: claude
+    review: codex
     verify: claude
 
   best-writing:

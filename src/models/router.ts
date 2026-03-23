@@ -120,7 +120,9 @@ export class ModelRouter {
 
     return new Promise((resolve, reject) => {
       const cmd = cfg.command ?? modelName;
-      const child = spawn(cmd, ['-p', prompt], { stdio: ['ignore', 'pipe', 'pipe'] });
+      // codex CLI uses 'exec' subcommand instead of '-p' flag
+      const args = cmd === 'codex' ? ['exec', prompt] : ['-p', prompt];
+      const child = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'] });
       let output = '';
       let errOutput = '';
 

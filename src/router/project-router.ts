@@ -141,46 +141,34 @@ export class ProjectRouter {
 
         // Direct execution — no confirmation needed
         const taskContent = command.taskDescription;
-        let project = await this.projectRegistry.matchProject(taskContent);
 
-        if (!project) {
-          const domain = AgentExecutor.detectDomain(taskContent);
-          const name = this.extractProjectName(taskContent) ?? this.generateProjectName(taskContent);
+        // Use existing project if matched, otherwise run in openagora directory
+        const project = await this.projectRegistry.matchProject(taskContent);
+        const projectPath = project?.path ?? process.cwd();
+        const domain = project?.domain ?? AgentExecutor.detectDomain(taskContent);
+        const agentId = this.agentRegistry.getAgentForDomain(domain);
 
-          await message.replyFn(`새 프로젝트를 생성합니다: **${name}** (도메인: ${domain})`);
+        await message.replyFn(`*${agentId}* 에이전트가 작업을 시작합니다...`);
+        await slackReact(message, 'hourglass_flowing_sand');
 
-          project = await this.creator.create({
-            name,
-            domain,
-            description: taskContent.slice(0, 200),
-            baseDir: this.baseDir,
-            githubUser: this.githubUser,
-          });
-        }
-
-        let agentId = this.agentRegistry.getAgentForDomain(project.domain);
-
-        await message.replyFn(`🔄 **${agentId}** 에이전트가 작업을 시작합니다...`);
-
-        const finalProject = project;
+        const projectId = project?.id ?? 'default';
         const taskMessage: ChannelMessage = { ...message, content: taskContent };
-        await this.queue.enqueue(project.id, taskMessage, async () => {
+
+        const progressFn: ProgressCallback = (status: string) => {
+          message.replyFn(`> ${toSlackMarkdown(status)}`).catch(() => {});
+        };
+
+        await this.queue.enqueue(projectId, taskMessage, async () => {
           const task = {
             id: message.id,
-            projectId: finalProject.id,
+            projectId,
             message: taskMessage,
             priority: 0,
             enqueuedAt: new Date(),
             status: 'running' as const,
           };
 
-          const progressFn: ProgressCallback = (status: string) => {
-            message.replyFn(`> ${toSlackMarkdown(status)}`).catch(() => {});
-          };
-
-          await slackReact(message, 'hourglass_flowing_sand');
-
-          const result = await this.orchestrator.run(task, agentId, finalProject.path, finalProject.domain, progressFn);
+          const result = await this.orchestrator.run(task, agentId, projectPath, domain, progressFn);
 
           await slackUnreact(message, 'hourglass_flowing_sand');
 
