@@ -110,9 +110,18 @@ export class AgentExecutor {
         env: {
           PATH: process.env['PATH'] ?? '/usr/local/bin:/usr/bin:/bin',
           HOME: process.env['HOME'] ?? homeDir(),
+          USER: process.env['USER'] ?? '',
+          SHELL: process.env['SHELL'] ?? '',
+          LANG: process.env['LANG'] ?? '',
+          TERM: process.env['TERM'] ?? '',
+          TMPDIR: process.env['TMPDIR'] ?? '',
           NODE_ENV: process.env['NODE_ENV'] ?? 'production',
-          ANTHROPIC_API_KEY: process.env['ANTHROPIC_API_KEY'] ?? '',
-          CLAUDE_CODE_MAX_TURNS: process.env['CLAUDE_CODE_MAX_TURNS'] ?? '',
+          XDG_CONFIG_HOME: process.env['XDG_CONFIG_HOME'] ?? '',
+          ...(process.env['ANTHROPIC_API_KEY'] ? { ANTHROPIC_API_KEY: process.env['ANTHROPIC_API_KEY'] } : {}),
+          ...(process.env['CLAUDE_CODE_MAX_TURNS'] ? { CLAUDE_CODE_MAX_TURNS: process.env['CLAUDE_CODE_MAX_TURNS'] } : {}),
+          ...(process.env['HTTP_PROXY'] ? { HTTP_PROXY: process.env['HTTP_PROXY'] } : {}),
+          ...(process.env['HTTPS_PROXY'] ? { HTTPS_PROXY: process.env['HTTPS_PROXY'] } : {}),
+          ...(process.env['NO_PROXY'] ? { NO_PROXY: process.env['NO_PROXY'] } : {}),
         },
         detached: true, // allows process group kill
       });

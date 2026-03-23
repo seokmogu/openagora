@@ -73,7 +73,7 @@ export class ProjectRegistry {
     const project: Project = {
       id,
       name: params.name,
-      path: join(defaultBaseDir(), id),
+      path: join(process.env['BASE_PROJECT_DIR'] ?? defaultBaseDir(), id),
       githubRepo: `${params.githubUser}/${id}`,
       domain: params.domain,
       agents: [],

@@ -1,5 +1,6 @@
 import express, { Request, Response } from 'express';
 import { createServer, Server } from 'node:http';
+import { timingSafeEqual } from 'node:crypto';
 import { ChannelType, ChannelMessage } from '../types/index.js';
 import { AppConfig } from '../config/loader.js';
 import { BaseAdapter } from './base.js';
@@ -35,7 +36,9 @@ export class WebhookAdapter extends BaseAdapter {
     app.post('/webhook', async (req: Request, res: Response) => {
       try {
         const authHeader = req.headers['webhook-secret'] ?? req.headers['x-webhook-secret'];
-        if (authHeader !== secret) {
+        if (!authHeader || typeof authHeader !== 'string' ||
+            authHeader.length !== secret.length ||
+            !timingSafeEqual(Buffer.from(authHeader), Buffer.from(secret))) {
           res.status(401).json({ error: 'Unauthorized' });
           return;
         }

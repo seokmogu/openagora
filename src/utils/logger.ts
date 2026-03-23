@@ -3,7 +3,11 @@ import path from 'node:path';
 import { ensureDir } from './platform.js';
 
 const LOG_DIR = path.resolve(process.cwd(), 'logs');
-ensureDir(LOG_DIR);
+try {
+  ensureDir(LOG_DIR);
+} catch {
+  // Fall back to console-only logging if log directory cannot be created
+}
 
 const isProduction = process.env['NODE_ENV'] === 'production';
 
