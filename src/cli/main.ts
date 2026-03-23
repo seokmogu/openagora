@@ -5,7 +5,7 @@ Usage: openagora <command> [options]
 
 Commands:
   start               Start the OpenAgora server
-  setup               Run the interactive onboarding wizard
+  setup               Run the interactive setup wizard
   status              Check server health status
   token list          List all configured tokens
   token add [adapter] Add or update a token interactively
@@ -13,6 +13,10 @@ Commands:
 
 Options:
   --help, help        Show this help message
+
+Quick Start:
+  npm install && npm run build && npm start
+  (Works immediately with Claude CLI - no API keys needed)
 
 Adapters: discord, slack, telegram, anthropic, github, webhook
 `;

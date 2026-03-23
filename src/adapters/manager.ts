@@ -13,24 +13,56 @@ export class AdapterManager {
   private adapters: BaseAdapter[] = [];
 
   constructor(config: AppConfig, router: ProjectRouter) {
+    const active: string[] = [];
+    const inactive: string[] = [];
+
     if (process.env['SLACK_BOT_TOKEN']) {
       this.adapters.push(new SlackAdapter(config));
+      active.push('Slack');
+    } else {
+      inactive.push('Slack (no SLACK_BOT_TOKEN)');
     }
     if (process.env['DISCORD_BOT_TOKEN']) {
       this.adapters.push(new DiscordAdapter(config));
+      active.push('Discord');
+    } else {
+      inactive.push('Discord (no DISCORD_BOT_TOKEN)');
     }
     if (process.env['TELEGRAM_BOT_TOKEN']) {
       this.adapters.push(new TelegramAdapter(config));
+      active.push('Telegram');
+    } else {
+      inactive.push('Telegram (no TELEGRAM_BOT_TOKEN)');
     }
     if (process.env['EMAIL_IMAP_HOST']) {
       this.adapters.push(new EmailAdapter(config));
+      active.push('Email');
+    } else {
+      inactive.push('Email (no EMAIL_IMAP_HOST)');
     }
-    this.adapters.push(new WebhookAdapter(config));
+    if (process.env['WEBHOOK_SECRET']) {
+      this.adapters.push(new WebhookAdapter(config));
+      active.push('Webhook');
+    } else {
+      inactive.push('Webhook (no WEBHOOK_SECRET)');
+    }
+
+    // CLI is always available
     this.adapters.push(new CliAdapter(config));
+    active.push('CLI');
 
     this.adapters.forEach((a) =>
       a.setHandler((msg) => router.handleMessage(msg)),
     );
+
+    logger.info('AdapterManager: channel detection complete', {
+      active: active.join(', '),
+      inactive: inactive.join(', '),
+    });
+  }
+
+  getActiveChannels(): string {
+    return this.adapters.map((a) => a.type).join(', ');
   }
 
   async startAll(): Promise<void> {

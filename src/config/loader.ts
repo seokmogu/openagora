@@ -99,5 +99,11 @@ export async function loadConfig(): Promise<AppConfig> {
     modelCount: Object.keys(config.models).length,
   });
 
+  const { existsSync } = await import('node:fs');
+  const { resolve } = await import('node:path');
+  if (!existsSync(resolve(process.cwd(), '.env'))) {
+    logger.info('No .env file found. Running with defaults (CLI mode). Run `openagora setup` to configure.');
+  }
+
   return config;
 }

@@ -59,6 +59,8 @@ describe('AdapterManager', () => {
     delete process.env['DISCORD_BOT_TOKEN'];
     delete process.env['TELEGRAM_BOT_TOKEN'];
     delete process.env['EMAIL_IMAP_HOST'];
+    // Set WEBHOOK_SECRET so webhook adapter is created in tests
+    process.env['WEBHOOK_SECRET'] = 'test-secret';
   });
 
   afterEach(() => {

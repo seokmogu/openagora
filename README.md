@@ -8,57 +8,37 @@ OpenAgora is an intelligent system that coordinates specialized AI agents across
 
 ## Quick Start
 
-### 1. Clone and Setup
+### Prerequisites
+
+- **Node.js 20+** ([download](https://nodejs.org/))
+- **Claude CLI** (authenticated) ([install guide](https://docs.anthropic.com/en/docs/claude-code))
+
+### 3 Commands to Start
 
 ```bash
-git clone <repo-url> openagora
-cd openagora
-cp .env.example .env
-```
-
-### 2. Configure Environment
-
-Edit `.env` and fill in your API keys:
-
-```bash
-# Essential (at minimum)
-ANTHROPIC_API_KEY=sk-ant-...
-SLACK_BOT_TOKEN=xoxb-...
-DISCORD_BOT_TOKEN=...
-GITHUB_TOKEN=...
-
-# Optional (for extended capabilities)
-GEMINI_API_KEY=...
-OPENAI_API_KEY=...
-PERPLEXITY_API_KEY=...
-NOTION_API_KEY=...
-```
-
-### 3. Install Dependencies
-
-```bash
-npm install
-npm run build
-```
-
-### 4. Start OpenAgora
-
-#### Local Development
-```bash
+git clone https://github.com/seokmogu/openagora && cd openagora
+npm install && npm run build
 npm start
 ```
 
-#### Docker
+OpenAgora starts in **CLI mode** — type your task directly in the terminal. No API keys or channel tokens needed.
+
+### Optional: Add Channel Integrations
+
+To connect Slack, Discord, or Telegram, run the setup wizard:
+
 ```bash
-docker-compose up --build
+openagora setup
 ```
 
-#### Systemd Service
+Or manually create `.env` and add your tokens:
+
 ```bash
-sudo cp openagora.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now openagora
+cp .env.example .env
+# Edit .env with your channel tokens
 ```
+
+See [Channel Configuration](#channel-configuration) below for details.
 
 ---
 

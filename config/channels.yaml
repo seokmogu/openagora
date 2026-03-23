@@ -1,19 +1,19 @@
 channels:
   slack:
-    enabled: true
+    enabled: false
     botToken: ${SLACK_BOT_TOKEN}
     appToken: ${SLACK_APP_TOKEN}
 
   discord:
-    enabled: true
+    enabled: false
     botToken: ${DISCORD_BOT_TOKEN}
 
   telegram:
-    enabled: true
+    enabled: false
     botToken: ${TELEGRAM_BOT_TOKEN}
 
   webhook:
-    enabled: true
+    enabled: false
     port: 3000
     secret: ${WEBHOOK_SECRET}
 

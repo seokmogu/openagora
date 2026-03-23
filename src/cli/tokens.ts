@@ -15,8 +15,8 @@ export const TOKEN_DEFINITIONS: TokenDef[] = [
     adapter: 'anthropic',
     label: 'Anthropic',
     envKey: 'ANTHROPIC_API_KEY',
-    required: true,
-    description: 'Anthropic API key for agent execution (sk-ant-...)',
+    required: false,
+    description: 'Anthropic API key (optional if Claude CLI is authenticated)',
     masked: true,
   },
   {
