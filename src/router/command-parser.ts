@@ -44,7 +44,7 @@ export class CommandParser {
       case 'discord':
         return /^(?:!openagora|!agora|@openagora)\s*/i.test(content);
       case 'slack':
-        return /^(?:@openagora|<@[A-Z0-9]+>)\s*/i.test(content);
+        return true; // All messages in bot channels are commands
       case 'telegram':
         return /^\/[a-z]+/i.test(content);
       case 'cli':
@@ -62,7 +62,7 @@ export class CommandParser {
         return content.replace(discordPrefixes, '');
       }
       case 'slack': {
-        const slackPrefixes = /^(?:@openagora|<@[A-Z0-9]+>)\s*/i;
+        const slackPrefixes = /^(?:@openagora|!openagora|!agora|<@[A-Z0-9]+>)\s*/i;
         return content.replace(slackPrefixes, '');
       }
       case 'telegram': {

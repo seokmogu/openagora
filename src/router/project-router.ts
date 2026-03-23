@@ -115,7 +115,49 @@ export class ProjectRouter {
 
       // Branch on verb
       if (command.verb === 'chat') {
-        await this.handleChat(command.taskDescription ?? '', message);
+        // Direct execution — no confirmation needed
+        const taskContent = command.taskDescription ?? message.content;
+        let project = await this.projectRegistry.matchProject(taskContent);
+
+        if (!project) {
+          const domain = AgentExecutor.detectDomain(taskContent);
+          const name = this.extractProjectName(taskContent) ?? this.generateProjectName(taskContent);
+
+          await message.replyFn(`새 프로젝트를 생성합니다: **${name}** (도메인: ${domain})`);
+
+          project = await this.creator.create({
+            name,
+            domain,
+            description: taskContent.slice(0, 200),
+            baseDir: this.baseDir,
+            githubUser: this.githubUser,
+          });
+        }
+
+        let agentId = this.agentRegistry.getAgentForDomain(project.domain);
+
+        await message.replyFn(`🔄 **${agentId}** 에이전트가 작업을 시작합니다...`);
+
+        const finalProject = project;
+        const taskMessage: ChannelMessage = { ...message, content: taskContent };
+        await this.queue.enqueue(project.id, taskMessage, async () => {
+          const task = {
+            id: message.id,
+            projectId: finalProject.id,
+            message: taskMessage,
+            priority: 0,
+            enqueuedAt: new Date(),
+            status: 'running' as const,
+          };
+
+          const result = await this.orchestrator.run(task, agentId, finalProject.path, finalProject.domain);
+
+          if (result.success) {
+            await message.replyFn(formatSuccess(agentId, result.summary, result.durationMs));
+          } else {
+            await message.replyFn(formatError(agentId, result.primary.output, result.durationMs));
+          }
+        });
         return;
       }
 
@@ -265,8 +307,9 @@ export class ProjectRouter {
     }
   }
 
-  /** Handle casual chat — use Claude to determine intent (task vs. chat). */
-  private async handleChat(content: string, message: ChannelMessage): Promise<void> {
+  /** Handle casual chat — use Claude to determine intent (task vs. chat). Kept for reference; no longer called. */
+  // @ts-expect-error: intentionally retained for reference; direct execution path now bypasses this method
+  private async _handleChatLegacy(content: string, message: ChannelMessage): Promise<void> {
     const { spawn } = await import('node:child_process');
 
     const intentPrompt = `You are an intent analyzer for a multi-agent orchestration bot called OpenAgora.
