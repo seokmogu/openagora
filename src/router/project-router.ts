@@ -8,6 +8,7 @@ import { ProjectCreator } from './project-creator.js';
 import { ProjectQueue } from '../queue/project-queue.js';
 import { AgentRegistry } from '../agents/registry.js';
 import { AgentExecutor } from '../agents/executor.js';
+import type { ProgressCallback } from '../agents/executor.js';
 import { BuilderAgent } from '../agents/builder-agent.js';
 import { MultiStageOrchestrator } from '../models/multi-stage.js';
 import { P2PRouter } from '../agents/p2p-router.js';
@@ -150,7 +151,11 @@ export class ProjectRouter {
             status: 'running' as const,
           };
 
-          const result = await this.orchestrator.run(task, agentId, finalProject.path, finalProject.domain);
+          const progressFn: ProgressCallback = (status: string) => {
+            message.replyFn(`> ${status}`).catch(() => {});
+          };
+
+          const result = await this.orchestrator.run(task, agentId, finalProject.path, finalProject.domain, progressFn);
 
           if (result.success) {
             await message.replyFn(formatSuccess(agentId, result.summary, result.durationMs));
@@ -286,7 +291,11 @@ export class ProjectRouter {
           status: 'running' as const,
         };
 
-        const result = await this.orchestrator.run(task, agentId, finalProject.path, finalDomain);
+        const progressFn: ProgressCallback = (status: string) => {
+          message.replyFn(`> ${status}`).catch(() => {});
+        };
+
+        const result = await this.orchestrator.run(task, agentId, finalProject.path, finalDomain, progressFn);
 
         if (result.success) {
           await message.replyFn(formatSuccess(agentId, result.summary, result.durationMs));

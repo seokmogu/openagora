@@ -7,6 +7,10 @@ import { ProcessWatcher } from '../health/process-watcher.js';
 import { WorktreeManager } from '../health/worktree.js';
 
 const TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes per task
+const PROGRESS_THROTTLE_MS = 5000; // minimum interval between progress callbacks
+
+/** Callback invoked with short status updates during agent execution. */
+export type ProgressCallback = (status: string) => void;
 
 export interface ExecutionResult {
   taskId: string;
@@ -20,7 +24,7 @@ export class AgentExecutor {
   constructor(private readonly processWatcher: ProcessWatcher) {}
 
   /** Run a queued task using the specified agent via claude CLI subprocess. */
-  async run(task: QueuedTask, agentId: string, projectPath: string): Promise<ExecutionResult> {
+  async run(task: QueuedTask, agentId: string, projectPath: string, onProgress?: ProgressCallback): Promise<ExecutionResult> {
     const breaker = CircuitBreakerRegistry.get(agentId);
     const startMs = Date.now();
 
@@ -39,7 +43,7 @@ export class AgentExecutor {
 
     try {
       logger.info('AgentExecutor: spawning claude', { taskId: task.id, agentId, projectPath });
-      const output = await this.spawnClaude(prompt, agentId, projectPath, task.id);
+      const output = await this.spawnClaude(prompt, agentId, projectPath, task.id, onProgress);
       breaker.recordSuccess();
 
       return {
@@ -80,13 +84,14 @@ export class AgentExecutor {
     agentId: string,
     projectPath: string,
     taskId: string,
+    onProgress?: ProgressCallback,
   ): Promise<string> {
     // Create isolated worktree for this task (P4 fix)
     const worktreePath = await WorktreeManager.create(projectPath, taskId);
     const cwd = worktreePath ?? projectPath;
 
     try {
-      return await this.spawnClaudeInDir(prompt, agentId, cwd, taskId);
+      return await this.spawnClaudeInDir(prompt, agentId, cwd, taskId, onProgress);
     } finally {
       if (worktreePath) {
         await WorktreeManager.remove(projectPath, taskId);
@@ -99,6 +104,7 @@ export class AgentExecutor {
     agentId: string,
     cwd: string,
     taskId: string,
+    onProgress?: ProgressCallback,
   ): Promise<string> {
     return new Promise((resolve, reject) => {
       // Use --agent flag so claude loads the right sub-agent definition
@@ -139,8 +145,22 @@ export class AgentExecutor {
       // Attach all listeners BEFORE checking pid to avoid spawn error races
       let stdout = '';
       let stderr = '';
+      let lastProgressTime = 0;
 
-      child.stdout?.on('data', (chunk: Buffer) => { stdout += chunk.toString(); });
+      child.stdout?.on('data', (chunk: Buffer) => {
+        stdout += chunk.toString();
+
+        if (onProgress) {
+          const now = Date.now();
+          if (now - lastProgressTime >= PROGRESS_THROTTLE_MS) {
+            lastProgressTime = now;
+            const status = extractProgress(stdout);
+            if (status) {
+              onProgress(status);
+            }
+          }
+        }
+      });
       child.stderr?.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
 
       const timer = setTimeout(() => {
@@ -194,4 +214,29 @@ export class AgentExecutor {
 
     return 'general';
   }
+}
+
+/** Extract a short progress status from claude CLI output. */
+function extractProgress(output: string): string | null {
+  const lines = output.split('\n').filter(l => l.trim());
+  if (lines.length === 0) return null;
+
+  // Get the last few meaningful lines
+  const recent = lines.slice(-5);
+
+  for (let i = recent.length - 1; i >= 0; i--) {
+    const line = recent[i]!.trim();
+
+    // Detect tool usage patterns
+    if (/\b(Read|Write|Edit|Bash|Grep|Glob|Agent|WebSearch|WebFetch)\b/.test(line)) {
+      return line.length > 150 ? line.slice(0, 147) + '...' : line;
+    }
+
+    // Detect thinking/reasoning indicators
+    if (line.length > 20 && line.length < 200) {
+      return line;
+    }
+  }
+
+  return `Processing... (${lines.length} lines output)`;
 }

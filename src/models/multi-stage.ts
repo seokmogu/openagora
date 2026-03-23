@@ -1,5 +1,5 @@
 import type { DomainType, Capability } from '../types/index.js';
-import type { AgentExecutor, ExecutionResult } from '../agents/executor.js';
+import type { AgentExecutor, ExecutionResult, ProgressCallback } from '../agents/executor.js';
 import type { QueuedTask } from '../types/index.js';
 import { ModelRouter } from './router.js';
 import { logger } from '../utils/logger.js';
@@ -96,6 +96,7 @@ export class MultiStageOrchestrator {
     agentId: string,
     projectPath: string,
     domain: DomainType,
+    onProgress?: ProgressCallback,
   ): Promise<MultiStageResult> {
     const start = Date.now();
     const capability = DOMAIN_CAPABILITY[domain] ?? 'best-coding';
@@ -109,7 +110,7 @@ export class MultiStageOrchestrator {
     });
 
     // Stage 1: Primary execution via claude agent subprocess
-    let primary = await this.executor.run(task, agentId, projectPath);
+    let primary = await this.executor.run(task, agentId, projectPath, onProgress);
 
     if (!primary.success) {
       return {
@@ -201,7 +202,7 @@ export class MultiStageOrchestrator {
           // decision === 'continue': retry primary with feedback appended
           previousVerifyText = verifyText;
           currentTask = this.taskWithFeedback(currentTask, verifyText);
-          primary = await this.executor.run(currentTask, agentId, projectPath);
+          primary = await this.executor.run(currentTask, agentId, projectPath, onProgress);
 
           if (!primary.success) {
             convergedReason = 'max-iterations';
