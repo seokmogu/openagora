@@ -15,6 +15,26 @@ import { P2PRouter } from '../agents/p2p-router.js';
 import { ProcessWatcher } from '../health/process-watcher.js';
 import { Notifier } from '../health/notifier.js';
 import { CommandParser, HELP_MESSAGE } from './command-parser.js';
+import { SlackAdapter } from '../adapters/slack.js';
+import { toSlackMarkdown, truncateForSlack } from '../utils/slack-format.js';
+
+async function slackReact(message: ChannelMessage, emoji: string): Promise<void> {
+  if (message.channel !== 'slack') return;
+  const ts = (message.metadata as Record<string, string>)?.ts;
+  const channelId = (message.metadata as Record<string, string>)?.channelId;
+  if (ts && channelId) {
+    await SlackAdapter.addReaction(channelId, ts, emoji);
+  }
+}
+
+async function slackUnreact(message: ChannelMessage, emoji: string): Promise<void> {
+  if (message.channel !== 'slack') return;
+  const ts = (message.metadata as Record<string, string>)?.ts;
+  const channelId = (message.metadata as Record<string, string>)?.channelId;
+  if (ts && channelId) {
+    await SlackAdapter.removeReaction(channelId, ts, emoji);
+  }
+}
 
 /** ProjectRouter: the central dispatch hub. */
 export class ProjectRouter {
@@ -152,14 +172,20 @@ export class ProjectRouter {
           };
 
           const progressFn: ProgressCallback = (status: string) => {
-            message.replyFn(`> ${status}`).catch(() => {});
+            message.replyFn(`> ${toSlackMarkdown(status)}`).catch(() => {});
           };
+
+          await slackReact(message, 'hourglass_flowing_sand');
 
           const result = await this.orchestrator.run(task, agentId, finalProject.path, finalProject.domain, progressFn);
 
+          await slackUnreact(message, 'hourglass_flowing_sand');
+
           if (result.success) {
+            await slackReact(message, 'white_check_mark');
             await message.replyFn(formatSuccess(agentId, result.summary, result.durationMs));
           } else {
+            await slackReact(message, 'x');
             await message.replyFn(formatError(agentId, result.primary.output, result.durationMs));
           }
         });
@@ -292,15 +318,21 @@ export class ProjectRouter {
         };
 
         const progressFn: ProgressCallback = (status: string) => {
-          message.replyFn(`> ${status}`).catch(() => {});
+          message.replyFn(`> ${toSlackMarkdown(status)}`).catch(() => {});
         };
+
+        await slackReact(message, 'hourglass_flowing_sand');
 
         const result = await this.orchestrator.run(task, agentId, finalProject.path, finalDomain, progressFn);
 
+        await slackUnreact(message, 'hourglass_flowing_sand');
+
         if (result.success) {
+          await slackReact(message, 'white_check_mark');
           await message.replyFn(formatSuccess(agentId, result.summary, result.durationMs));
           void this.notifier?.send({ title: 'Task completed', body: result.summary.slice(0, 300), level: 'success', projectId: finalProject.id, agentId, durationMs: result.durationMs });
         } else {
+          await slackReact(message, 'x');
           await message.replyFn(formatError(agentId, result.primary.output, result.durationMs));
           void this.notifier?.send({ title: 'Task failed', body: result.primary.output.slice(0, 200), level: 'error', projectId: finalProject.id, agentId, durationMs: result.durationMs });
         }
@@ -476,11 +508,13 @@ function extractNovelDomain(content: string): string {
 
 function formatSuccess(agentId: string, output: string, durationMs: number): string {
   const secs = (durationMs / 1000).toFixed(1);
-  const preview = output.length > 1500 ? `${output.slice(0, 1500)}\n\n_(출력 일부 생략)_` : output;
-  return `✅ **${agentId}** 완료 (${secs}s)\n\n${preview}`;
+  const converted = toSlackMarkdown(output);
+  const preview = truncateForSlack(converted);
+  return `*${agentId}* 완료 (${secs}s)\n\n${preview}`;
 }
 
 function formatError(agentId: string, error: string, durationMs: number): string {
   const secs = (durationMs / 1000).toFixed(1);
-  return `❌ **${agentId}** 실패 (${secs}s)\n\n\`\`\`\n${error.slice(0, 500)}\n\`\`\``;
+  const truncated = error.slice(0, 500);
+  return `*${agentId}* 실패 (${secs}s)\n\n\`\`\`\n${truncated}\n\`\`\``;
 }

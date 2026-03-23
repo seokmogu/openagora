@@ -8,9 +8,39 @@ import { logger } from '../utils/logger.js';
 export class SlackAdapter extends BaseAdapter {
   readonly type: ChannelType = 'slack';
   private app?: InstanceType<typeof App>;
+  private static instance?: SlackAdapter;
 
   constructor(config: AppConfig) {
     super(config);
+    SlackAdapter.instance = this;
+  }
+
+  /** Add a reaction emoji to a message. */
+  static async addReaction(channel: string, timestamp: string, emoji: string): Promise<void> {
+    if (!SlackAdapter.instance?.app) return;
+    try {
+      await SlackAdapter.instance.app.client.reactions.add({
+        channel,
+        timestamp,
+        name: emoji,
+      });
+    } catch (err) {
+      logger.debug('SlackAdapter: failed to add reaction', { emoji, err });
+    }
+  }
+
+  /** Remove a reaction emoji from a message. */
+  static async removeReaction(channel: string, timestamp: string, emoji: string): Promise<void> {
+    if (!SlackAdapter.instance?.app) return;
+    try {
+      await SlackAdapter.instance.app.client.reactions.remove({
+        channel,
+        timestamp,
+        name: emoji,
+      });
+    } catch (err) {
+      logger.debug('SlackAdapter: failed to remove reaction', { emoji, err });
+    }
   }
 
   async start(): Promise<void> {
@@ -54,7 +84,7 @@ export class SlackAdapter extends BaseAdapter {
           userId,
           content,
           timestamp: new Date(),
-          metadata: { ts: msg.ts },
+          metadata: { ts: msg.ts, channelId: msg.channel },
           replyFn: async (text: string) => {
             await say({ text, thread_ts: msg.ts });
           },
