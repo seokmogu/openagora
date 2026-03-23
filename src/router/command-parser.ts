@@ -27,6 +27,11 @@ export class CommandParser {
     const trimmed = content.trim();
     const ch = channel as ChannelType;
 
+    // Skip empty or system messages
+    if (!trimmed) {
+      return { ok: true, command: { verb: 'chat', projectName: null, taskDescription: null, raw } };
+    }
+
     // If no bot prefix detected → treat as casual chat, not a command
     if (!this.hasPrefix(trimmed, ch)) {
       return {

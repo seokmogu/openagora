@@ -136,8 +136,11 @@ export class ProjectRouter {
 
       // Branch on verb
       if (command.verb === 'chat') {
+        // Skip empty or system messages
+        if (!command.taskDescription?.trim()) return;
+
         // Direct execution — no confirmation needed
-        const taskContent = command.taskDescription ?? message.content;
+        const taskContent = command.taskDescription;
         let project = await this.projectRegistry.matchProject(taskContent);
 
         if (!project) {
