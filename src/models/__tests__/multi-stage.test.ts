@@ -7,10 +7,15 @@ vi.mock('../../utils/logger.js', () => ({
 // Mock ModelRouter
 const mockGetRoute = vi.fn();
 const mockModelRun = vi.fn();
+const mockIsModelAvailable = vi.fn().mockReturnValue(true);
+const mockFindAvailable = vi.fn().mockImplementation((candidates: string[]) => candidates[0] ?? null);
 vi.mock('../router.js', () => ({
   ModelRouter: class MockModelRouter {
     getRoute = mockGetRoute;
     run = mockModelRun;
+    runWithModel = mockModelRun;
+    isModelAvailable = mockIsModelAvailable;
+    findAvailable = mockFindAvailable;
   },
 }));
 

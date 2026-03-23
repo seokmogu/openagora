@@ -283,12 +283,45 @@ export class MultiStageOrchestrator {
     };
   }
 
+  /**
+   * Resolve which model to use for a secondary stage, applying fallback priority.
+   * Returns null if no model is available (stage should be skipped).
+   */
+  private resolveStageModel(
+    role: 'review' | 'verify',
+    configuredModel: string | undefined,
+  ): string | null {
+    // Use configured model if available
+    if (configuredModel && this.modelRouter.isModelAvailable(configuredModel)) {
+      return configuredModel;
+    }
+
+    // Fallback priority differs slightly per role to prefer the most capable available model
+    const fallbackOrder = role === 'review'
+      ? ['claude', 'codex', 'gemini']
+      : ['claude', 'gemini', 'codex'];
+
+    return this.modelRouter.findAvailable(fallbackOrder);
+  }
+
   private async runStage(
     role: 'review' | 'verify',
     task: QueuedTask,
     primaryOutput: string,
     capability: Capability,
   ): Promise<StageResult> {
+    const route = this.modelRouter.getRoute(capability);
+    const configuredModel = route[role];
+    const resolvedModel = this.resolveStageModel(role, configuredModel);
+
+    if (!resolvedModel) {
+      logger.info(`MultiStageOrchestrator: skipping ${role} stage, no model available`, {
+        taskId: task.id,
+        configured: configuredModel,
+      });
+      return { status: 'skipped' };
+    }
+
     const truncated = truncateForPrompt(primaryOutput);
     const prompt = role === 'review'
       ? this.reviewPrompt(task.message.content, truncated)
@@ -296,7 +329,7 @@ export class MultiStageOrchestrator {
 
     try {
       const result = await withTimeout(
-        this.modelRouter.run(capability, prompt, role),
+        this.modelRouter.runWithModel(resolvedModel, prompt, role),
         STAGE_TIMEOUT_MS,
         `${role} stage`,
       );

@@ -48,6 +48,26 @@ export class ModelRouter {
     }
   }
 
+  /** Check if a model is configured and has credentials. */
+  isModelAvailable(modelName: string): boolean {
+    const cfg = this.config.models[modelName];
+    if (!cfg) return false;
+    if (cfg.type === 'cli') return true; // CLI models use local auth
+    if (cfg.apiKey?.startsWith('${') && cfg.apiKey.endsWith('}')) {
+      const envVar = cfg.apiKey.slice(2, -1);
+      return !!process.env[envVar];
+    }
+    return !!cfg.apiKey;
+  }
+
+  /** Find first available model from candidates, or null if none available. */
+  findAvailable(candidates: string[]): string | null {
+    for (const name of candidates) {
+      if (this.isModelAvailable(name)) return name;
+    }
+    return null;
+  }
+
   /** Get model names for a capability (primary + optional review/verify). */
   getRoute(capability: Capability): CapabilityRoute {
     const route = this.config.capabilities[capability];
@@ -75,9 +95,14 @@ export class ModelRouter {
   async run(capability: Capability, prompt: string, role: keyof CapabilityRoute = 'primary'): Promise<ModelRunResult> {
     const route = this.getRoute(capability);
     const modelName = route[role] ?? route.primary;
+    return this.runWithModel(modelName, prompt, role);
+  }
+
+  /** Run a prompt against an explicitly named model. */
+  async runWithModel(modelName: string, prompt: string, role: keyof CapabilityRoute = 'primary'): Promise<ModelRunResult> {
     const modelCfg = this.getModelConfig(modelName);
 
-    logger.info('ModelRouter: running', { capability, role, model: modelName });
+    logger.info('ModelRouter: running', { model: modelName, role });
 
     if (modelCfg.type === 'cli') {
       return this.runCli(modelName, modelCfg, prompt, role);
