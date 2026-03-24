@@ -64,6 +64,14 @@ async function main(): Promise<void> {
 
   process.on('SIGTERM', () => void shutdown('SIGTERM'));
   process.on('SIGINT', () => void shutdown('SIGINT'));
+
+  // Prevent uncaught exceptions from crashing the process (e.g., Slack WebSocket state machine errors)
+  process.on('uncaughtException', (err) => {
+    logger.error('Uncaught exception (server continues)', { error: String(err) });
+  });
+  process.on('unhandledRejection', (reason) => {
+    logger.error('Unhandled rejection (server continues)', { reason: String(reason) });
+  });
 }
 
 main().catch((err: unknown) => {
