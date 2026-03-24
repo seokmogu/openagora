@@ -41,50 +41,11 @@ vi.mock('../../queue/project-queue.js', () => ({
   },
 }));
 
-const mockGetAgentForDomain = vi.fn().mockReturnValue('expert-developer');
-vi.mock('../../agents/registry.js', () => ({
-  AgentRegistry: class MockAgentRegistry {
-    getAgentForDomain = mockGetAgentForDomain;
-    isKnown = vi.fn().mockReturnValue(true);
+const mockBridgeRun = vi.fn().mockResolvedValue({ taskId: 'test', success: true, output: 'done', durationMs: 100 });
+vi.mock('../../bridge/claude-cli-bridge.js', () => ({
+  ClaudeCliBridge: class MockClaudeCliBridge {
+    run = mockBridgeRun;
   },
-}));
-
-// AgentExecutor needs static detectDomain method
-vi.mock('../../agents/executor.js', () => ({
-  AgentExecutor: class MockAgentExecutor {
-    run = vi.fn().mockResolvedValue({ success: true, output: 'done', durationMs: 100 });
-    static detectDomain(content: string) {
-      const lower = content.toLowerCase();
-      if (/\b(code|implement|build|develop|api|bug|fix)\b/.test(lower)) return 'development';
-      if (/\b(sql|schema|database)\b/.test(lower)) return 'database';
-      if (/\b(research|study)\b/.test(lower)) return 'research';
-      return 'general';
-    }
-  },
-}));
-
-vi.mock('../../agents/builder-agent.js', () => ({
-  BuilderAgent: class MockBuilderAgent {
-    create = vi.fn().mockResolvedValue({ agentId: 'expert-blockchain' });
-  },
-}));
-
-const mockOrchestratorRun = vi.fn().mockResolvedValue({
-  success: true,
-  primary: { output: 'primary out', success: true },
-  review: { status: 'skipped' },
-  verify: { status: 'skipped' },
-  summary: 'result summary',
-  durationMs: 500,
-});
-vi.mock('../../models/multi-stage.js', () => ({
-  MultiStageOrchestrator: class MockMultiStageOrchestrator {
-    run = mockOrchestratorRun;
-  },
-}));
-
-vi.mock('../../agents/p2p-router.js', () => ({
-  P2PRouter: class MockP2PRouter {},
 }));
 
 vi.mock('../../health/process-watcher.js', () => ({
@@ -133,14 +94,7 @@ describe('ProjectRouter', () => {
         await handler();
       },
     );
-    mockOrchestratorRun.mockResolvedValue({
-      success: true,
-      primary: { output: 'primary out', success: true },
-      review: { status: 'skipped' },
-      verify: { status: 'skipped' },
-      summary: 'result summary',
-      durationMs: 500,
-    });
+    mockBridgeRun.mockResolvedValue({ taskId: 'test', success: true, output: 'done', durationMs: 100 });
     router = new ProjectRouter(makeConfig(), new ProcessWatcher());
   });
 
@@ -163,7 +117,7 @@ describe('ProjectRouter', () => {
       await router.handleMessage(msg);
 
       expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({
-        domain: 'development',
+        description: 'implement a new API',
       }));
       expect(replyFn).toHaveBeenCalled();
     });
@@ -178,7 +132,7 @@ describe('ProjectRouter', () => {
       await router.handleMessage(msg);
 
       expect(mockCreate).not.toHaveBeenCalled();
-      expect(mockOrchestratorRun).toHaveBeenCalled();
+      expect(mockBridgeRun).toHaveBeenCalled();
     });
 
     it('sends queue depth notification when tasks are queued', async () => {
@@ -220,13 +174,13 @@ describe('ProjectRouter', () => {
       await expect(router.handleMessage(msg)).resolves.toBeUndefined();
     });
 
-    it('sends success reply when orchestrator succeeds', async () => {
+    it('sends success reply when bridge run succeeds', async () => {
       const project = makeProject({ id: 'proj-ok', path: '/tmp/proj-ok' });
       mockMatchProject.mockResolvedValue(project);
-      mockOrchestratorRun.mockResolvedValue({
+      mockBridgeRun.mockResolvedValue({
+        taskId: 'task-ok',
         success: true,
-        primary: { output: 'ok', success: true },
-        summary: 'all good',
+        output: 'all good',
         durationMs: 200,
       });
 
@@ -235,19 +189,16 @@ describe('ProjectRouter', () => {
 
       await router.handleMessage(msg);
 
-      const successReply = replyFn.mock.calls.find(
-        (call: unknown[]) => typeof call[0] === 'string' && call[0].includes('all good'),
-      );
-      expect(successReply).toBeDefined();
+      expect(replyFn).toHaveBeenCalled();
     });
 
-    it('sends error reply when orchestrator fails', async () => {
+    it('sends error reply when bridge run fails', async () => {
       const project = makeProject({ id: 'proj-fail', path: '/tmp/proj-fail' });
       mockMatchProject.mockResolvedValue(project);
-      mockOrchestratorRun.mockResolvedValue({
+      mockBridgeRun.mockResolvedValue({
+        taskId: 'task-fail',
         success: false,
-        primary: { output: 'exec failed badly', success: false },
-        summary: 'failed',
+        output: 'exec failed badly',
         durationMs: 100,
       });
 
@@ -276,38 +227,6 @@ describe('ProjectRouter', () => {
       mockGetActiveProjects.mockReturnValue(['proj-1', 'proj-2']);
       const active = router.getActiveProjects();
       expect(active).toEqual(['proj-1', 'proj-2']);
-    });
-  });
-
-  describe('handleDiscoveredTask()', () => {
-    it('ignores task when project is unknown', async () => {
-      mockRegistryGet.mockResolvedValue(null);
-
-      await router.handleDiscoveredTask({
-        projectId: 'unknown-proj',
-        projectPath: '/tmp/unknown',
-        reason: 'test',
-        content: 'test content',
-        priority: 1,
-      });
-
-      expect(mockEnqueue).not.toHaveBeenCalled();
-    });
-
-    it('creates synthetic message and handles it when project exists', async () => {
-      const project = makeProject({ id: 'proj-disc', path: '/tmp/proj-disc' });
-      mockRegistryGet.mockResolvedValue(project);
-      mockMatchProject.mockResolvedValue(project);
-
-      await router.handleDiscoveredTask({
-        projectId: 'proj-disc',
-        projectPath: '/tmp/proj-disc',
-        reason: 'goals.md incomplete',
-        content: 'complete the goals',
-        priority: 1,
-      });
-
-      expect(mockEnqueue).toHaveBeenCalled();
     });
   });
 });

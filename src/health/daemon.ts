@@ -6,8 +6,6 @@ import { HealthMonitor } from './health-monitor.js';
 import { ProcessWatcher } from './process-watcher.js';
 import type { ProjectRouter } from '../router/project-router.js';
 import { Notifier } from './notifier.js';
-import { TaskDiscovery } from './task-discovery.js';
-import type { DiscoveredTask } from './task-discovery.js';
 
 const HEALTH_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
 
@@ -15,7 +13,6 @@ export class HealthDaemon {
   private monitor: HealthMonitor;
   private processWatcher: ProcessWatcher;
   private readonly notifier: Notifier;
-  private readonly taskDiscovery: TaskDiscovery;
   private interval?: NodeJS.Timeout;
   private healthServer?: http.Server;
 
@@ -23,12 +20,6 @@ export class HealthDaemon {
     this.monitor = new HealthMonitor();
     this.processWatcher = new ProcessWatcher();
     this.notifier = new Notifier();
-    this.taskDiscovery = new TaskDiscovery({
-      onDiscover: async (task) => {
-        logger.info('TaskDiscovery: discovered task', { projectId: task.projectId, reason: task.reason });
-        // Will be replaced via setDiscoveryCallback()
-      },
-    });
   }
 
   async start(): Promise<void> {
@@ -38,7 +29,6 @@ export class HealthDaemon {
     });
 
     this.processWatcher.start();
-    this.taskDiscovery.start();
 
     this.interval = setInterval(() => {
       void this.runCheck();
@@ -58,7 +48,6 @@ export class HealthDaemon {
     }
 
     this.processWatcher.stop();
-    this.taskDiscovery.stop();
 
     await new Promise<void>((resolve) => {
       if (this.healthServer) {
@@ -84,14 +73,6 @@ export class HealthDaemon {
       getActiveProjects: () => router.getActiveProjects(),
       getQueueStats: () => router.getQueueStats(),
     });
-  }
-
-  setDiscoveryCallback(fn: (task: DiscoveredTask) => Promise<void>): void {
-    this.taskDiscovery.onDiscover = fn;
-  }
-
-  getTaskDiscovery(): TaskDiscovery {
-    return this.taskDiscovery;
   }
 
   private async runCheck(): Promise<void> {

@@ -36,20 +36,6 @@ vi.mock('../notifier.js', () => ({
   },
 }));
 
-// Mock TaskDiscovery -- needs constructor that accepts opts
-const mockTdStart = vi.fn();
-const mockTdStop = vi.fn();
-vi.mock('../task-discovery.js', () => ({
-  TaskDiscovery: class MockTaskDiscovery {
-    start = mockTdStart;
-    stop = mockTdStop;
-    onDiscover: unknown;
-    constructor(opts: { onDiscover: unknown }) {
-      this.onDiscover = opts.onDiscover;
-    }
-  },
-}));
-
 // Mock express and http
 const mockListen = vi.fn().mockImplementation(function listen(_port: number, cb: () => void) { cb(); });
 const mockClose = vi.fn().mockImplementation(function close(cb: () => void) { cb(); });
@@ -88,12 +74,11 @@ describe('HealthDaemon', () => {
   });
 
   describe('start()', () => {
-    it('starts process watcher and task discovery', async () => {
+    it('starts process watcher', async () => {
       const daemon = new HealthDaemon(makeConfig());
       await daemon.start();
 
       expect(mockPwStart).toHaveBeenCalled();
-      expect(mockTdStart).toHaveBeenCalled();
     });
 
     it('runs initial health check on start', async () => {
@@ -119,13 +104,12 @@ describe('HealthDaemon', () => {
   });
 
   describe('stop()', () => {
-    it('stops process watcher and task discovery', async () => {
+    it('stops process watcher', async () => {
       const daemon = new HealthDaemon(makeConfig());
       await daemon.start();
       await daemon.stop();
 
       expect(mockPwStop).toHaveBeenCalled();
-      expect(mockTdStop).toHaveBeenCalled();
     });
 
     it('clears health check interval', async () => {
@@ -185,17 +169,6 @@ describe('HealthDaemon', () => {
         getActiveProjects: expect.any(Function),
         getQueueStats: expect.any(Function),
       });
-    });
-  });
-
-  describe('setDiscoveryCallback()', () => {
-    it('replaces onDiscover function on task discovery', () => {
-      const daemon = new HealthDaemon(makeConfig());
-      const callback = vi.fn();
-      daemon.setDiscoveryCallback(callback);
-
-      const td = daemon.getTaskDiscovery();
-      expect(td.onDiscover).toBe(callback);
     });
   });
 

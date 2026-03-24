@@ -6,12 +6,8 @@ import { logger } from '../utils/logger.js';
 import { ProjectRegistry } from './registry.js';
 import { ProjectCreator } from './project-creator.js';
 import { ProjectQueue } from '../queue/project-queue.js';
-import { AgentRegistry } from '../agents/registry.js';
-import { AgentExecutor } from '../agents/executor.js';
-import type { ProgressCallback } from '../agents/executor.js';
-import { BuilderAgent } from '../agents/builder-agent.js';
-import { MultiStageOrchestrator } from '../models/multi-stage.js';
-import { P2PRouter } from '../agents/p2p-router.js';
+import { ClaudeCliBridge } from '../bridge/claude-cli-bridge.js';
+import type { ProgressCallback } from '../bridge/claude-cli-bridge.js';
 import { ProcessWatcher } from '../health/process-watcher.js';
 import { Notifier } from '../health/notifier.js';
 import { CommandParser, HELP_MESSAGE } from './command-parser.js';
@@ -39,12 +35,9 @@ async function slackUnreact(message: ChannelMessage, emoji: string): Promise<voi
 /** ProjectRouter: the central dispatch hub. */
 export class ProjectRouter {
   private readonly projectRegistry: ProjectRegistry;
-  private readonly agentRegistry: AgentRegistry;
   private readonly creator: ProjectCreator;
   private readonly queue: ProjectQueue;
-  private readonly executor: AgentExecutor;
-  private readonly p2pRouter: P2PRouter;
-  private readonly orchestrator: MultiStageOrchestrator;
+  private readonly bridge: ClaudeCliBridge;
   private readonly commandParser: CommandParser;
   private notifier?: Notifier;
 
@@ -60,17 +53,9 @@ export class ProjectRouter {
 
   constructor(private readonly config: AppConfig, processWatcher: ProcessWatcher) {
     this.projectRegistry = new ProjectRegistry(config.registry.projectsPath);
-    this.agentRegistry = new AgentRegistry(process.cwd());
     this.creator = new ProjectCreator(this.projectRegistry);
     this.queue = new ProjectQueue();
-    this.executor = new AgentExecutor(processWatcher);
-    this.p2pRouter = new P2PRouter(this.executor, this.agentRegistry);
-    this.orchestrator = new MultiStageOrchestrator(
-      this.executor,
-      join(process.cwd(), 'config'),
-      this.p2pRouter,
-    );
-
+    this.bridge = new ClaudeCliBridge(processWatcher);
     this.commandParser = new CommandParser();
     this.baseDir = process.env['BASE_PROJECT_DIR'] ?? defaultBaseDir();
     this.githubUser = process.env['GITHUB_USER'] ?? 'unknown';
@@ -150,10 +135,8 @@ export class ProjectRouter {
           if (!existsSync(neutralDir)) mkdirSync(neutralDir, { recursive: true });
         }
         const projectPath = project?.path ?? neutralDir;
-        const domain = project?.domain ?? AgentExecutor.detectDomain(taskContent);
-        const agentId = this.agentRegistry.getAgentForDomain(domain);
 
-        await message.replyFn(`*${agentId}* 에이전트가 작업을 시작합니다...`);
+        await message.replyFn(`*claude* 에이전트가 작업을 시작합니다...`);
         await slackReact(message, 'hourglass_flowing_sand');
 
         const projectId = project?.id ?? 'default';
@@ -164,25 +147,16 @@ export class ProjectRouter {
         };
 
         await this.queue.enqueue(projectId, taskMessage, async () => {
-          const task = {
-            id: message.id,
-            projectId,
-            message: taskMessage,
-            priority: 0,
-            enqueuedAt: new Date(),
-            status: 'running' as const,
-          };
-
-          const result = await this.orchestrator.run(task, agentId, projectPath, domain, progressFn);
+          const result = await this.bridge.run(projectPath, taskContent, message.id, progressFn);
 
           await slackUnreact(message, 'hourglass_flowing_sand');
 
           if (result.success) {
             await slackReact(message, 'white_check_mark');
-            await message.replyFn(formatSuccess(agentId, result.summary, result.durationMs));
+            await message.replyFn(formatSuccess('claude', result.output, result.durationMs));
           } else {
             await slackReact(message, 'x');
-            await message.replyFn(formatError(agentId, result.primary.output, result.durationMs));
+            await message.replyFn(formatError('claude', result.output, result.durationMs));
           }
         });
         return;
@@ -235,16 +209,15 @@ export class ProjectRouter {
         : await this.projectRegistry.matchProject(taskContent);
 
       if (!project) {
-        const domain = AgentExecutor.detectDomain(taskContent);
         const name = command.projectName ?? this.extractProjectName(taskContent) ?? this.generateProjectName(taskContent);
 
         await message.replyFn(
-          `새 프로젝트를 생성합니다: **${name}** (도메인: ${domain})\n잠시 기다려 주세요...`,
+          `새 프로젝트를 생성합니다: **${name}**\n잠시 기다려 주세요...`,
         );
 
         project = await this.creator.create({
           name,
-          domain,
+          domain: 'general',
           description: taskContent.slice(0, 200),
           baseDir: this.baseDir,
           githubUser: this.githubUser,
@@ -255,35 +228,8 @@ export class ProjectRouter {
         );
       }
 
-      // 2. Get agent for domain
-      let agentId = this.agentRegistry.getAgentForDomain(project.domain);
-
-      // 2a. If domain is 'general' and content is substantial, try BuilderAgent
-      if (project.domain === 'general' && taskContent.length > 100) {
-        const novelDomain = extractNovelDomain(taskContent);
-        try {
-          const builder = new BuilderAgent(process.cwd(), this.agentRegistry);
-          const buildResult = await builder.create({
-            domain: novelDomain,
-            name: `${novelDomain.charAt(0).toUpperCase()}${novelDomain.slice(1)} Expert`,
-            description: `Specialized agent for ${novelDomain} tasks`,
-            responsibilities: [`Handle ${novelDomain} domain requests`, 'Produce structured outputs', 'Apply domain expertise'],
-            capabilities: [`${novelDomain}-expertise`, 'domain-analysis', 'structured-output'],
-            tools: ['Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep'],
-          });
-          agentId = buildResult.agentId;
-          logger.info('ProjectRouter: BuilderAgent created specialized agent', { novelDomain, agentId });
-        } catch (builderErr) {
-          const msg = builderErr instanceof Error ? builderErr.message : String(builderErr);
-          logger.warn('ProjectRouter: BuilderAgent failed, falling back to expert-developer', { err: msg });
-          agentId = 'expert-developer';
-        }
-      }
-
       logger.info('ProjectRouter: routing task', {
         projectId: project.id,
-        domain: project.domain,
-        agentId,
         queueDepth: this.queue.getDepth(project.id),
       });
 
@@ -296,22 +242,12 @@ export class ProjectRouter {
 
       // 3. Enqueue — concurrency=1 per project (P1 solution)
       const finalProject = project;
-      const finalDomain = project.domain;
-      // Synthetic message with parsed task content so orchestrator receives clean task
+      // Synthetic message with parsed task content so bridge receives clean task
       const taskMessage: ChannelMessage = { ...message, content: taskContent };
       await this.queue.enqueue(project.id, taskMessage, async () => {
         await message.replyFn(
-          `🔄 **${agentId}** 에이전트가 작업을 시작합니다...`,
+          `🔄 **claude** 에이전트가 작업을 시작합니다...`,
         );
-
-        const task = {
-          id: message.id,
-          projectId: finalProject.id,
-          message: taskMessage,
-          priority: 0,
-          enqueuedAt: new Date(),
-          status: 'running' as const,
-        };
 
         const progressFn: ProgressCallback = (status: string) => {
           message.replyFn(`> ${toSlackMarkdown(status)}`).catch(() => {});
@@ -319,18 +255,18 @@ export class ProjectRouter {
 
         await slackReact(message, 'hourglass_flowing_sand');
 
-        const result = await this.orchestrator.run(task, agentId, finalProject.path, finalDomain, progressFn);
+        const result = await this.bridge.run(finalProject.path, taskContent, message.id, progressFn);
 
         await slackUnreact(message, 'hourglass_flowing_sand');
 
         if (result.success) {
           await slackReact(message, 'white_check_mark');
-          await message.replyFn(formatSuccess(agentId, result.summary, result.durationMs));
-          void this.notifier?.send({ title: 'Task completed', body: result.summary.slice(0, 300), level: 'success', projectId: finalProject.id, agentId, durationMs: result.durationMs });
+          await message.replyFn(formatSuccess('claude', result.output, result.durationMs));
+          void this.notifier?.send({ title: 'Task completed', body: result.output.slice(0, 300), level: 'success', projectId: finalProject.id, agentId: 'claude', durationMs: result.durationMs });
         } else {
           await slackReact(message, 'x');
-          await message.replyFn(formatError(agentId, result.primary.output, result.durationMs));
-          void this.notifier?.send({ title: 'Task failed', body: result.primary.output.slice(0, 200), level: 'error', projectId: finalProject.id, agentId, durationMs: result.durationMs });
+          await message.replyFn(formatError('claude', result.output, result.durationMs));
+          void this.notifier?.send({ title: 'Task failed', body: result.output.slice(0, 200), level: 'error', projectId: finalProject.id, agentId: 'claude', durationMs: result.durationMs });
         }
       });
     } catch (err) {
@@ -450,56 +386,6 @@ Rules:
     return this.queue.getActiveProjects();
   }
 
-  async handleDiscoveredTask(task: import('../health/task-discovery.js').DiscoveredTask): Promise<void> {
-    const project = await this.projectRegistry.get(task.projectId);
-    if (!project) {
-      logger.warn('ProjectRouter: discovered task for unknown project', { projectId: task.projectId });
-      return;
-    }
-
-    const syntheticMessage: ChannelMessage = {
-      id: `discovery-${Date.now()}`,
-      channel: 'cli',
-      channelId: 'discovery',
-      userId: 'system',
-      content: task.content,
-      timestamp: new Date(),
-      replyFn: async (reply) => {
-        logger.info('TaskDiscovery reply', { projectId: task.projectId, reply: reply.slice(0, 200) });
-      },
-    };
-
-    await this.handleMessage(syntheticMessage);
-  }
-}
-
-/** Extract a potential novel domain name from message content. */
-function extractNovelDomain(content: string): string {
-  const lower = content.toLowerCase();
-  const domainKeywords = [
-    'blockchain', 'crypto', 'defi', 'nft',
-    'legal', 'law', 'contract',
-    'medical', 'health', 'clinical',
-    'finance', 'trading', 'investment',
-    'marketing', 'seo', 'advertising',
-    'education', 'teaching', 'learning',
-    'logistics', 'supply', 'inventory',
-    'security', 'cybersecurity', 'infosec',
-    'gaming', 'game', 'unity',
-    'ai', 'machine learning', 'ml',
-    'devops', 'infrastructure', 'cloud',
-    'design', 'ui', 'ux',
-    'mobile', 'ios', 'android',
-  ];
-
-  for (const keyword of domainKeywords) {
-    if (lower.includes(keyword)) {
-      // Normalize multi-word keywords to single identifier
-      return keyword.replace(/\s+/g, '-');
-    }
-  }
-
-  return 'specialist';
 }
 
 function formatSuccess(agentId: string, output: string, durationMs: number): string {

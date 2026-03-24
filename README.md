@@ -6,12 +6,36 @@ OpenAgora is an intelligent system that coordinates specialized AI agents across
 
 ---
 
+## Prerequisites
+
+### Required
+
+| Tool | Version | Purpose | Install |
+|------|---------|---------|---------|
+| Node.js | >= 20.0.0 | Runtime | [nodejs.org](https://nodejs.org/) |
+| Claude Code CLI | Latest | AI agent execution | [Install Guide](https://docs.anthropic.com/en/docs/claude-code) |
+| npm | Bundled with Node.js | Package management | Included |
+
+### Authentication
+
+Claude Code CLI must be authenticated before running OpenAgora:
+
+```bash
+claude login
+```
+
+### Optional
+
+| Tool | Purpose | Install |
+|------|---------|---------|
+| GitHub CLI (`gh`) | Project repo creation | `brew install gh` |
+| Slack Bot Token | Slack channel integration | [Slack API](https://api.slack.com/apps) |
+| Discord Bot Token | Discord integration | [Discord Developer](https://discord.com/developers) |
+| Telegram Bot Token | Telegram integration | [@BotFather](https://t.me/BotFather) |
+
+---
+
 ## Quick Start
-
-### Prerequisites
-
-- **Node.js 20+** ([download](https://nodejs.org/))
-- **Claude CLI** (authenticated) ([install guide](https://docs.anthropic.com/en/docs/claude-code))
 
 ### 3 Commands to Start
 

@@ -45,7 +45,6 @@ async function main(): Promise<void> {
   const router = new ProjectRouter(config, health.getProcessWatcher());
   health.setRouter(router);
   router.setNotifier(health.getNotifier());
-  health.setDiscoveryCallback(task => router.handleDiscoveredTask(task));
   const adapters = new AdapterManager(config, router);
 
   await router.init();
