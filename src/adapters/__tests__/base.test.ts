@@ -20,7 +20,6 @@ class TestAdapter extends BaseAdapter {
 function makeConfig(): AppConfig {
   return {
     channels: {},
-    models: {},
     server: { port: 3000, host: '0.0.0.0' },
     queue: { concurrency: 1, maxRetries: 3, retryDelayMs: 5000 },
     health: { intervalMs: 30000, port: 3001 },

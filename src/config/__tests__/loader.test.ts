@@ -33,7 +33,6 @@ describe('loadConfig()', () => {
     const config = await loadConfig();
 
     expect(config.channels).toEqual({});
-    expect(config.models).toEqual({});
     expect(config.server).toHaveProperty('port');
     expect(config.server).toHaveProperty('host');
     expect(config.queue).toHaveProperty('concurrency');
@@ -42,20 +41,13 @@ describe('loadConfig()', () => {
 
   it('parses YAML file and returns config', async () => {
     const channelsData = { discord: { enabled: true, token: 'tok' } };
-    const modelsData = { claude: { provider: 'anthropic', model: 'claude', capabilities: [] } };
 
-    // readFile is called twice: once for channels.yaml, once for models.yaml
-    mockReadFile
-      .mockResolvedValueOnce('channels yaml content')
-      .mockResolvedValueOnce('models yaml content');
-    mockParseYaml
-      .mockReturnValueOnce(channelsData)
-      .mockReturnValueOnce(modelsData);
+    mockReadFile.mockResolvedValueOnce('channels yaml content');
+    mockParseYaml.mockReturnValueOnce(channelsData);
 
     const config = await loadConfig();
 
     expect(config.channels).toEqual(channelsData);
-    expect(config.models).toEqual(modelsData);
   });
 
   it('throws on non-ENOENT errors', async () => {

@@ -102,7 +102,11 @@ export class SlackAdapter extends BaseAdapter {
 
   async stop(): Promise<void> {
     if (this.app) {
-      await this.app.stop();
+      try {
+        await this.app.stop();
+      } catch {
+        // Ignore WebSocket disconnect errors during shutdown
+      }
       logger.info('SlackAdapter: stopped');
     }
   }

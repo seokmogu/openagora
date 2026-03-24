@@ -10,19 +10,9 @@ export interface ChannelConfig {
   options?: Record<string, unknown>;
 }
 
-/** Model provider configuration. */
-export interface ModelConfig {
-  provider: string;
-  model: string;
-  apiKey?: string;
-  capabilities: string[];
-  options?: Record<string, unknown>;
-}
-
 /** Full application configuration. */
 export interface AppConfig {
   channels: Record<string, ChannelConfig>;
-  models: Record<string, ModelConfig>;
   server: {
     port: number;
     host: string;
@@ -59,7 +49,6 @@ async function loadYamlFile<T>(filePath: string): Promise<T | null> {
 
 const DEFAULT_CONFIG: AppConfig = {
   channels: {},
-  models: {},
   server: {
     port: parseInt(process.env['PORT'] ?? '3000', 10),
     host: process.env['HOST'] ?? '0.0.0.0',
@@ -81,22 +70,16 @@ const DEFAULT_CONFIG: AppConfig = {
 
 export async function loadConfig(): Promise<AppConfig> {
   const channelsPath = path.join(CONFIG_DIR, 'channels.yaml');
-  const modelsPath = path.join(CONFIG_DIR, 'models.yaml');
 
-  const [channelsData, modelsData] = await Promise.all([
-    loadYamlFile<Record<string, ChannelConfig>>(channelsPath),
-    loadYamlFile<Record<string, ModelConfig>>(modelsPath),
-  ]);
+  const channelsData = await loadYamlFile<Record<string, ChannelConfig>>(channelsPath);
 
   const config: AppConfig = {
     ...DEFAULT_CONFIG,
     channels: channelsData ?? DEFAULT_CONFIG.channels,
-    models: modelsData ?? DEFAULT_CONFIG.models,
   };
 
   logger.info('Configuration loaded', {
     channelCount: Object.keys(config.channels).length,
-    modelCount: Object.keys(config.models).length,
   });
 
   const { existsSync } = await import('node:fs');
